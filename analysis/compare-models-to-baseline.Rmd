@@ -19,23 +19,234 @@ First, import packages for data manipulation and retrieve prediction data, gold 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 set.seed(98109)
 
+library(tidyverse)
+library(reticulate)
+library(challengescoring)
+
+# Synapse setup to use `reticulate`
+use_condaenv("synapse")
+synapseclient <- reticulate::import('synapseclient')
+syn <- synapseclient$Synapse()
+syn$login()
+```
+
+Additionally, define functions to help with the scoring algorithms.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# 
+calculate_weight <- function(x){
+  weight <- dplyr::if_else(x == 0, 1,
+            dplyr::if_else(x == 1, 2,
+            dplyr::if_else(x>=2 & x<=3, 2.143547,
+            dplyr::if_else(x>=4 & x<=7, 3.863745,
+            dplyr::if_else(x>=8 & x<=20, 8,
+            dplyr::if_else(x>=21 & x<=55, 16,
+            dplyr::if_else(x>=56 & x<=148, 32,
+            dplyr::if_else(x>=148, 64, 0))))))))
+  return(weight)
+}
+
+# 
+sum_weighted_error <- function(gold, pred, weight){
+  sum(weight*abs(gold - pred))
+}
+
+# 
+rmse <- function(gold, pred){
+  sqrt(mean((gold - pred) ** 2))
+}
+
+# Scoring function for joint weighted sum RMSE.
+score_weighted_rmse <- function(df, pred) {
+  df$pred_score <- pred
+  df %>% group_by(Patient_ID, weight) %>%
+    summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+    ungroup() %>% 
+    summarize(result= sum(weight*patient_rmse)/sum(weight)) %>%
+    pluck("result")
+}
+```
+
+The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+gold <- read.csv(syn$get("syn22254942")$path) %>%
+  mutate(weight = calculate_weight(Overall_Tol))
+
+gold.sc1 <- gold %>% 
+  select(Patient_ID, Overall_Tol, weight)
+
+gold_joints <- gold %>%
+  select(-Overall_Tol) %>%
+  gather('joint', 'score', -Patient_ID, -weight)
 ```
 
 Read in prediction files, combine, then bootstrap the predictions + a gold standard 1000 times to calculate 1000 scores per prediction. 
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+N <- 1000  # number of bootstrapped scores to be calculated
 
+query <- syn$tableQuery(
+  "SELECT id, prediction_fileid, submitterid, createdOn,
+    sc1_weighted_sum_error AS sc1, 
+    sc2_joint_weighted_sum_rmse AS sc2, 
+    sc3_joint_weighted_sum_rmse AS sc3
+  FROM syn22236264 WHERE status = 'ACCEPTED' AND 
+    submitterid <> 3408914")$asDataFrame() %>%
+  group_by(submitterid) %>%
+  slice(which.max(createdOn)) %>%
+  select(-createdOn)
+
+# For easier identification, replace each team/participant's submitterid with
+# their team name/username.
+query$submitterid <- as.character(query$submitterid)
+team_names <- sapply(query$submitterid, function(sub) {
+  name <- tryCatch({
+    syn$getUserProfile(sub)$userName
+  }, error = function(err) {
+    syn$getTeam(sub)$name
+  })
+  return(name)
+})
+query$submitterid <- team_names
+
+pred_filenames <- lapply(query$prediction_fileid, function(id) {
+  syn$get(id)$path
+})
+names(pred_filenames) <- team_names
+
+
+# Create matrices of goldstandard scores and each team's predicted scores,
+# arranging the teams by rank, where left = better performance and right = not
+# as great performance.
+
+### SC1
+submissions.sc1 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    mutate_at(vars(-Patient_ID), ~ replace(., which(.<0), 0)) %>%
+    select(Patient_ID, Overall_Tol) %>%
+    rename(!!team := Overall_Tol)
+}) %>%
+  reduce(left_join, by="Patient_ID") %>%
+  left_join(gold.sc1, by="Patient_ID") %>%
+  rename(gold = Overall_Tol)
+
+results.sc1 <- submissions.sc1[,c("gold", "weight", (query %>% arrange(sc1))$submitterid)]
+
+bs_indices.sc1 <- matrix(1:nrow(results.sc1), nrow(results.sc1), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc1 <- apply(bs_indices.sc1, 2, function(ind) {
+  tmp.gold <- results.sc1[ind,c(1:2)]
+  apply(results.sc1[ind, -c(1:2)], 2, function(pred) {
+    sum_weighted_error(
+      log2(tmp.gold$gold + 1),
+      log2(pred + 1),
+      tmp.gold$weight
+    ) / sum(tmp.gold$weight)
+  })
+}) %>%
+  t()
+
+### SC2
+submissions.sc23 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    select(-Overall_Tol) %>%
+    gather('joint', !!team, -Patient_ID)
+}) %>%
+  reduce(left_join, by=c("Patient_ID", "joint")) %>%
+  left_join(gold_joints, by=c("Patient_ID", "joint"))
+
+results.sc2 <- submissions.sc23[, c(
+    "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc2))$submitterid
+  )] %>%
+  filter(grepl(".+_J__.+", joint))
+
+bs_indices.sc2 <- matrix(1:nrow(results.sc2), nrow(results.sc2), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
+  tmp.gold <- results.sc2[ind, c(1:4)]
+  apply(results.sc2[ind, -c(1:4)], 2, function(pred) {
+    score_weighted_rmse(tmp.gold, pred)
+  })
+}) %>%
+  t()
+
+### SC3
+results.sc3 <- submissions.sc23[, c(
+    "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc3))$submitterid
+  )] %>%
+  filter(grepl(".+_E__.+", joint))
+
+bs_indices.sc3 <- matrix(1:nrow(results.sc3), nrow(results.sc3), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
+  tmp.gold <- results.sc3[ind, c(1:4)]
+  apply(results.sc3[ind, -c(1:4)], 2, function(pred) {
+    score_weighted_rmse(tmp.gold, pred)
+  })
+}) %>%
+  t()
 ```
 
-Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the baseline/comparator prediction (the reference prediction). 
+Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the baseline/comparator prediction (the reference prediction). Because the baseline scores are less than the top performing scores, the Bayes factor will need to be inverted (`invertBayes=TRUE`).
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Baseline: RA2 Baseline Model (columns 15, 12 and 10)
+bayes_baseline.sc1 <- computeBayesFactor(boot.sc1, refPredIndex=15, invertBayes=T) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
 
+bayes_baseline.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=12, invertBayes=T) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+bayes_baseline.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=10, invertBayes=T) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+```
+```{r, echo=FALSE}
+bayes_baseline.sc1
+bayes_baseline.sc2
+bayes_baseline.sc3
 ```
 
 Then plot boxplot of all scores, coloring the boxes by Bayes factor. 
 
 ```{r echo=TRUE}
-
-
+par(mar = c(3,14,3,1))
+boxplot(
+  boot.sc1[,ncol(boot.sc1):1],
+  main = "SC1 - Bootstrapped Sum Error",
+  horizontal = T, 
+  las = 1, 
+  outline = F,
+  col = "#56B4E9"
+)
+boxplot(
+  boot.sc1[,6:1],
+  main = "SC1 - Top 6 Bootstrapped Sum Error",
+  horizontal = T, 
+  las = 1, 
+  outline = F,
+  col = "#56B4E9"
+)
+boxplot(
+  boot.sc2[,ncol(boot.sc2):1],
+  main = "SC2 - Bootstrapped Joint Sum RMSE",
+  horizontal = T, 
+  las = 1, 
+  outline = F,
+  col = "#56B4E9"
+)
+boxplot(
+  boot.sc3[,ncol(boot.sc3):1],
+  main = "SC3 - Bootstrapped Joint Sum RMSE",
+  horizontal = T, 
+  las = 1, 
+  outline = F,
+  col = "#56B4E9"
+)
 ```
