@@ -22,6 +22,7 @@ set.seed(98109)
 library(tidyverse)
 library(reticulate)
 library(challengescoring)
+library(ggplot2)
 
 # Synapse setup to use `reticulate`
 use_condaenv("synapse")
