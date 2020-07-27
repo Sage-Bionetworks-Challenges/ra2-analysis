@@ -1,13 +1,15 @@
 ---
-title: "Bootstrap analysis: Determine top performers"
+title: 'Bootstrap analysis: Determine top performers'
 author: "Verena Chung, Robert Allaway"
 date: "`r Sys.Date()`"
 output:
   html_document:
-    df_print: paged
     code_fold: hide
-    toc: true
-    toc_float: true
+    df_print: paged
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
 ---
 
 ## Introduction 
@@ -22,6 +24,7 @@ set.seed(98109)
 library(tidyverse)
 library(reticulate)
 library(challengescoring)
+library(ggplot2)
 
 # Synapse setup to use `reticulate`
 use_condaenv("synapse")
@@ -207,7 +210,7 @@ bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
 # Top performer: Gold Therapy (column 1)
 bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
-  rename(bayes = value)
+  rename(bayes = value) 
 ```
 ```{r, echo=FALSE}
 bayes_top.sc1
@@ -217,38 +220,30 @@ bayes_top.sc3
 
 Then plot boxplot of all scores, coloring the boxes by Bayes factor. 
 
-```{r echo=TRUE}
-par(mar = c(3,14,3,1))
-boxplot(
-  boot.sc1[,ncol(boot.sc1):1],
-  main = "SC1 - Bootstrapped Sum Error",
-  horizontal = T, 
-  las = 1, 
-  outline = F,
-  col = "#56B4E9"
-)
-boxplot(
-  boot.sc1[,6:1],
-  main = "SC1 - Top 6 Bootstrapped Sum Error",
-  horizontal = T, 
-  las = 1, 
-  outline = F,
-  col = "#56B4E9"
-)
-boxplot(
-  boot.sc2[,ncol(boot.sc2):1],
-  main = "SC2 - Bootstrapped Joint Sum RMSE",
-  horizontal = T, 
-  las = 1, 
-  outline = F,
-  col = "#56B4E9"
-)
-boxplot(
-  boot.sc3[,ncol(boot.sc3):1],
-  main = "SC3 - Bootstrapped Joint Sum RMSE",
-  horizontal = T, 
-  las = 1, 
-  outline = F,
-  col = "#56B4E9"
-)
+```{r echo=TRUE, message=FALSE}
+plot_results <- function(results, bayes, subchallenge) {
+  results %>%
+    as_data_frame() %>%
+    gather(submission, bs_score) %>%
+    left_join(bayes) %>%
+    mutate(bayes_category=case_when(
+      bayes == 0 ~ "Reference",
+      bayes<=3 ~ "<3",
+      bayes>=3 & bayes <5 ~ "3-5",
+      bayes>=5 & bayes <10 ~ "5-10",
+      bayes>=10 ~ ">10")) %>%
+    ggplot(aes(
+      x=fct_reorder(submission, -bs_score, .fun = mean),
+      y=bs_score,
+      color=bayes_category
+    )) +
+    geom_boxplot() +
+    theme_bw() +
+    coord_flip() +
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"), color="Bayes Factor")
+}
+
+plot_results(boot.sc1, bayes_top.sc1, "SC1")
+plot_results(boot.sc2, bayes_top.sc2, "SC2")
+plot_results(boot.sc3, bayes_top.sc3, "SC3")
 ```
