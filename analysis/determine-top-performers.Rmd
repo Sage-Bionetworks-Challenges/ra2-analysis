@@ -1,6 +1,6 @@
 ---
 title: "Bootstrap analysis: Determine top performers"
-author: "Verena Chung, Robert Allaway"
+author: "Verena Chung"
 date: "`r Sys.Date()`"
 output:
   html_notebook:
@@ -243,8 +243,15 @@ plot_results <- function(results, bayes, subchallenge) {
     )) +
     geom_boxplot() +
     theme_bw() +
+    scale_color_manual(values = c(
+      "Reference"="#d32e36", 
+      '<3' = '#cf4d6f', 
+      "3-5" = "#cc7e85",
+      "5-10" = '#c5afa4', 
+      ">10" = "#a8a6a4"),
+      name = "Bayes Factor") +
     coord_flip() +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"), color="Bayes Factor")
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
 }
 
 plot_results(boot.sc1, bayes_top.sc1, "SC1")

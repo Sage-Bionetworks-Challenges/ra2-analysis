@@ -1,6 +1,6 @@
 ---
-title: "Bootstrap analysis: determine which models are better than baseline or comparator"
-author: "Verena Chung, Robert Allaway"
+title: "Bootstrap analysis: determine which models are better than baseline"
+author: "Verena Chung"
 date: "`r Sys.Date()`"
 output:
   html_notebook:
@@ -12,7 +12,7 @@ output:
 
 ## Introduction
 
-This is the same analysis as `determine-top-performers.Rmd`, but the `refPredIndex` for calculating the Bayes factor is set based on the baseline model. This will allow you to determine which models submitted were better than the baseline, or published reference comparator model provided by the organizers. 
+This is the same analysis as `determine-top-performers.Rmd`, but the `refPredIndex` for calculating the Bayes factor is set based on the baseline model. This will allow you to determine which models submitted were better than the baseline provided by the organizers. 
 
 ## Setup
 
@@ -23,7 +23,6 @@ set.seed(98109)
 
 library(tidyverse)
 library(reticulate)
-library(challengescoring)
 library(ggplot2)
 
 # Synapse setup to use `reticulate`
@@ -201,19 +200,38 @@ boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
 
 ## Bayes Factor Analysis
 
-Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the baseline/comparator prediction (the reference prediction). Because the baseline scores are less than the top performing scores, the Bayes factor will need to be inverted (`invertBayes=TRUE`).
+The Bayes factor calculation for the analysis against the baseline model is a little bit more complicated because the reference is in the middle.  This consequently means that the inversion of K (BF) will be dependent on which submission is being compared to the baseline.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
+                               refPredIndex,
+                               invertBayes){
+
+    M <- as.data.frame(bootstrapMetricMatrix - bootstrapMetricMatrix[,refPredIndex])
+    K <- apply(M ,2, function(x) {
+      k <- sum(x >= 0)/sum(x < 0)
+      if(sum(x >= 0) > sum(x < 0)){
+      return(k)
+      }else{
+      return(1/k)
+      }
+    })
+    if(invertBayes == T){K <- 1/K}
+    K[refPredIndex] <- 0
+
+    return(K)
+}
+
 # Baseline: RA2 Baseline Model (columns 15, 12 and 10)
-bayes_baseline.sc1 <- computeBayesFactor(boot.sc1, refPredIndex=15, invertBayes=T) %>%
+bayes_baseline.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=15, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value)
 
-bayes_baseline.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=12, invertBayes=T) %>%
+bayes_baseline.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=12, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value)
 
-bayes_baseline.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=10, invertBayes=T) %>%
+bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=10, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value)
 ```
@@ -225,11 +243,11 @@ Plot boxplot of all scores, coloring the boxes by Bayes factor.
 ```{r echo=TRUE, message=FALSE}
 plot_results <- function(results, bayes, subchallenge) {
   results %>%
-    as_data_frame() %>%
+    as_tibble() %>%
     gather(submission, bs_score) %>%
     left_join(bayes) %>%
     mutate(bayes_category=case_when(
-      submission == "RA2 Baseline Model" ~ "Reference",
+      bayes == 0 ~ "Reference",
       bayes<=3 ~ "<3",
       bayes>=3 & bayes <5 ~ "3-5",
       bayes>=5 & bayes <10 ~ "5-10",
@@ -241,8 +259,15 @@ plot_results <- function(results, bayes, subchallenge) {
     )) +
     geom_boxplot() +
     theme_bw() +
+    scale_color_manual(values = c(
+      "Reference"="#d32e36", 
+      '<3' = '#cf4d6f', 
+      "3-5" = "#cc7e85",
+      "5-10" = '#c5afa4', 
+      ">10" = "#a8a6a4"),
+      name = "Bayes Factor") +
     coord_flip() +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"), color="Bayes Factor")
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
 }
 
 plot_results(boot.sc1, bayes_baseline.sc1, "SC1")
