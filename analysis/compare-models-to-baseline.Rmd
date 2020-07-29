@@ -236,6 +236,22 @@ bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex
   rename(bayes = value)
 ```
 
+#### Subchallenge 1
+```{r echo=FALSE}
+bayes_baseline.sc1
+```
+
+#### Subchallenge 2
+```{r echo=FALSE}
+bayes_baseline.sc2
+```
+
+#### Subchallenge 3
+```{r echo=FALSE}
+bayes_baseline.sc3
+```
+
+
 ## Plot Results
 
 Plot boxplot of all scores, coloring the boxes by Bayes factor. 
