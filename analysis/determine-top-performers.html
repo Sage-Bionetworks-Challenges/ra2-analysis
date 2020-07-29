@@ -2909,33 +2909,20 @@ div.tocify {
 <p>First, import packages for data manipulation and retrieve prediction data, gold standard data, and the template for use in the scoring code. Don’t forget to set a seed!</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuc2V0LnNlZWQoOTgxMDkpXG5gYGAifQ== -->
-<pre class="r"><code>set.seed(98109)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiV2FybmluZyBtZXNzYWdlczpcbjE6IEluIHJlYWRDaGFyKGZpbGUsIHNpemUsIFRSVUUpIDogdHJ1bmNhdGluZyBzdHJpbmcgd2l0aCBlbWJlZGRlZCBudWxzXG4yOiBJbiByZWFkQ2hhcihmaWxlLCBzaXplLCBUUlVFKSA6IHRydW5jYXRpbmcgc3RyaW5nIHdpdGggZW1iZWRkZWQgbnVsc1xuMzogSW4gcmVhZENoYXIoZmlsZSwgc2l6ZSwgVFJVRSkgOiB0cnVuY2F0aW5nIHN0cmluZyB3aXRoIGVtYmVkZGVkIG51bHNcbjQ6IEluIHJlYWRDaGFyKGZpbGUsIHNpemUsIFRSVUUpIDogdHJ1bmNhdGluZyBzdHJpbmcgd2l0aCBlbWJlZGRlZCBudWxzXG4ifQ== -->
-<pre><code>Warning messages:
-1: In readChar(file, size, TRUE) : truncating string with embedded nuls
-2: In readChar(file, size, TRUE) : truncating string with embedded nuls
-3: In readChar(file, size, TRUE) : truncating string with embedded nuls
-4: In readChar(file, size, TRUE) : truncating string with embedded nuls</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeSh0aWR5dmVyc2UpXG5saWJyYXJ5KHJldGljdWxhdGUpXG5saWJyYXJ5KGNoYWxsZW5nZXNjb3JpbmcpXG5saWJyYXJ5KGdncGxvdDIpXG5cbiMgU3luYXBzZSBzZXR1cCB0byB1c2UgYHJldGljdWxhdGVgXG51c2VfY29uZGFlbnYoXCJzeW5hcHNlXCIpXG5gYGAifQ== -->
-<pre class="r"><code>library(tidyverse)
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuc2V0LnNlZWQoOTgxMDkpXG5cbmxpYnJhcnkodGlkeXZlcnNlKVxubGlicmFyeShyZXRpY3VsYXRlKVxubGlicmFyeShjaGFsbGVuZ2VzY29yaW5nKVxubGlicmFyeShnZ3Bsb3QyKVxuXG4jIFN5bmFwc2Ugc2V0dXAgdG8gdXNlIGByZXRpY3VsYXRlYFxudXNlX2NvbmRhZW52KFwic3luYXBzZVwiKVxuc3luYXBzZWNsaWVudCA8LSByZXRpY3VsYXRlOjppbXBvcnQoJ3N5bmFwc2VjbGllbnQnKVxuc3luIDwtIHN5bmFwc2VjbGllbnQkU3luYXBzZSgpXG5zeW4kbG9naW4oKVxuYGBgIn0= -->
+<pre class="r"><code>set.seed(98109)
+
+library(tidyverse)
 library(reticulate)
 library(challengescoring)
 library(ggplot2)
 
 # Synapse setup to use `reticulate`
-use_condaenv(&quot;synapse&quot;)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuc3luYXBzZWNsaWVudCA8LSByZXRpY3VsYXRlOjppbXBvcnQoJ3N5bmFwc2VjbGllbnQnKVxuc3luIDwtIHN5bmFwc2VjbGllbnQkU3luYXBzZSgpXG5zeW4kbG9naW4oKVxuYGBgIn0= -->
-<pre class="r"><code>synapseclient &lt;- reticulate::import('synapseclient')
+use_condaenv(&quot;synapse&quot;)
+synapseclient &lt;- reticulate::import('synapseclient')
 syn &lt;- synapseclient$Synapse()
 syn$login()</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiV2VsY29tZSwgVmVyZW5hIENodW5nIVxuIn0= -->
-<pre><code>Welcome, Verena Chung!</code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <div id="functions" class="section level3">
@@ -3143,7 +3130,7 @@ bayes_top.sc3 &lt;- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) 
 <h3>Subchallenge 1</h3>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTUzAvYlFCQTJKZzdFaGFZQ3JwWDJEeVFTUlJVOUVvaDRTRWtPSWVGMWljYjJFbS9aN0VaZXB4QXU4Sk80OEZkNjdyVzNja2Vrczhtc1JIM3ZTbDdQZkRQZlBIYW0yN3pZQ1M5Q3ovT1d2Wks5QTd5OG9OODdySDN6dkpLUHloSWFLdlovaCtaTkZDejRDYjhxR1Q3ME9JellhU295b1FqNmZLelZjQXBxeUZxQ2dVclk1UVRVdGRXUFVDQ25TbXdnQWhFSlRVRFFpWGUzZDBsWnZUY0RFTEhtcEM5M0drMFMxNDYwVEZndjVSbU1wNjZJaGh3THhWa0xFdU1ZM2NzMmlWc0gvVUh6OUdUUWJYd1pIS1FnSlZkREYzamxSc1RwcE5seVZmMlFrRXgxWmxJQ3drYWt1VExDc0ROQ1BsNUZZcWdFdjJYbityc0NRamN3T05zSHc2V3RvNjBUTHEzdi9LSG83RzA5dmY3OC9ZdnZKYzk5ZXg3K0xQRC85UzlNTUZBdzRvYW01N3YyekNRYUNXT0Vkbk1KSXBoYXQzKzRsVXpmMWgxLzNmSWY4WnJOWmkvRkpMRUU0NUk0TUV3Z2gvcDFobnpVM2dxVUZUM09NVDJTZkx0ZlpVdVlteGZuZmFDbHJBQlVKOHBXbGRSd2h1cW05clhBWFNlNStrNzJGK245R1lVcVU2Z1NqMU8zaW1WY0VCeWo2MGxDaE5PazZlTkx6QitpUHNhRnoxMkhpSnA2cm5Od2ZtR3NwVVBtUFh0dmZ3RWhlZGNUYmdNQUFBPT0ifQ== -->
+<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTelU3YlFCQTJKazZJS1ExcXVTTHRDeVJTNEVDUEJDSlNwTUFoSkMxd2ljYjJFbS9aN0VaZXB6UmM0SkY2NFZWNjdyVzNja2VFMldSV0F0OVp5ZXVaYithYm41M3B0Yzkzdy9QUTg3eFZyMlR2QUM4dkdQU1A2bDg4citTanNvS0dxdjMvUXZObkZDeTRpVitORE90OURtTjJsb3BNS0lLMnYybzFtb0Vhc2E1Z29CSjJNUVYxWmZVT0N1UlVqUTFFSUNLaENRaE80NzNtSGlscnQyWUlJdGFjOU5YVFZwdkVEeDB0RTlaUGVRYVRtU3VpSlNkQ2NkYUZ4RGhHNytLRXhLM0R3YkI5ZGp6c3RYYUdoeWxJeWRYSUJhNWNpemlkdHJ1dXFwOFNrcG5PVEVwQTJJbzBWMFlZOW8yUWo1ZVJHQ25CYjloMy9VTUJvWjh3T0RzQXc2V3Q0MFFuWEZyZnhVUFIyZC82L2ZUbjMxKytuendNN0xuN3Y4VGY2MStZWUtCZ3pBMU56M2Z0bVdrMEZzWUk3ZVlTUkRDemJtKzQxVXpmTkJ4L3cvTHY4WnJQNTQvRkpMRUU0NUk0TUV3Z2g4WlZobnpVbmd1VWlwN2ttQjVKdnQydnNpVXN6TXZ6T3RCS1ZnQTJwOHBXbGRSeGh1cTYzbXdXeUJzazExN0ovaksvUDZkWVpZcFY0bkhxZHJHTUc0SnpkRTFKaUhDY05INThpc1ZMTkNhNDhibHJFVkhUeUhVT3ppK010WFRJb21uditRV1I0ZVV1YndNQUFBPT0ifQ== -->
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
 {"columns":[{"label":["submission"],"name":[1],"type":["chr"],"align":["left"]},{"label":["bayes"],"name":[2],"type":["dbl"],"align":["right"]}],"data":[{"1":"Team Shirin","2":"0.00000"},{"1":"Hongyang Li and Yuanfang Guan","2":"5.17284"},{"1":"csabaibio","2":"165.66667"},{"1":"Nc717","2":"Inf"},{"1":"zs_aicoe","2":"Inf"},{"1":"NAD","2":"Inf"},{"1":"Gold Therapy","2":"Inf"},{"1":"Alpine Lads","2":"Inf"},{"1":"RYM","2":"Inf"},{"1":"CU_DSI_RA2_Challenge","2":"Inf"},{"1":"kichuDL","2":"Inf"},{"1":"vladyorsh","2":"Inf"},{"1":"Aboensis V","2":"Inf"},{"1":"Zbigniew Wojna","2":"Inf"},{"1":"RA2 Baseline Model","2":"Inf"}],"options":{"columns":{"min":{},"max":[10],"total":[2]},"rows":{"min":[10],"max":[10],"total":[15]},"pages":{}}}
@@ -3157,7 +3144,7 @@ bayes_top.sc3 &lt;- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) 
 <h3>Subchallenge 2</h3>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTUzA3RE1CQU5vU2swZklxQUxaSXYwRXA4SkZoU3FDaEloVVVwMzAwMVNVeGpjT3dxVGlsbEE2ZUNCVWZoRW5BQnlyaTFFV1NQcGRnemIvejhNcDlXL1hMVHYvUWR4NWwyQ25yM2NITzhzL1pCWmNkeENpNDZVeGdvNmZNQnd5dG9hSEFKdjdJSnJCMUswUjJDNkpJbUl5QWljdFVIY2FQOUJocm0wbnhEOG9pMFk1cENiMml3VXFnZ0FCWXdhWURGNjRCMUJhTURjaUZ2QlJoMHJzWjdURkRTaEVoWnFFMGhJYWN4UzVrVm1ENnAxWTNwbllUYjY5dkdtWDFVSFdDaHBGYjBua00wbEttS0RlRFhBa21GWW9xY0cyUzVWZHNnZTZBbzE3TEhNcUxjaXJTdWpvMDVjOGZDdUY5dkduZDEvNnhUUHozcUlMV3pId1BuVkhTcFRtbGNLTE4yNFMxNWVVOWVuejRtL24rZnVRNTZBaEtxVFBkY203N3FCd2xUaWtsYlNTK0FvYjcyaDF0SzVhQnErUXVhLzR6YmFEVDZ6SXVFSEpRVnNhQWZRUWJWbXhUNTZIM2xLRE95bDZFOGtsdzlYMFZOR0ljbjYvZERVMmtPS1BlRi9xdW9nczBRZDVXdEhIZkIyT1ZmdGp1UmQwZm1xYUo1cWtERDJFNWlFZHVIemJjNWNRaCtabUFSS3pFdVJMV0gwNWZaREJGVjFVeG1ZTy81b2VRV0dlZnNmSDBERTlLZ0gyNERBQUE9In0= -->
+<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTUzA3RE1CQk5RMU5vK0FyWUl2a0NyUVFzWUVtaG9pQVZGcVY4TjlVa01ZM0JzYXM0cFpRTm5Bb1dISVZMd0FVbzQ5WkdKWHNzeFo1NTQrZVgrYlRxVjl2K2xlODR6b3hUMUx1SG0rT2R0dzhydTQ1VGRORXBZS0NzejBjTXI2R2h3Ulg4bGsxZzQwaUs3aEJFbHpRWkFSR1I2ejZJVyswMzBEQ1hGaHFTUjZRZDB4UjZRNE9WUXdVQnNJQkpBeXpkQkt3ckdCMlFTM2tud0tEek5kNWpncEltUk1wQ2JRb0pPWXRaeXF6QXpHbXRia3p2Tk56WjNESE8zSlBxQUFzbHRhSVBIS0toVEZWc0FMOFdTQ29VVStUQ0lLdXQyaGJaQjBXNWxqMlJFZVZXcEhWOVlzelpleGJHL1hyVHVPc0g1NTM2MlhFSHFaMkRHRGlub2t0MVN1TkNtYlVINzhuclIvTDIvRG54Ly92TWRkQVRrRkJsdXVmYTlGVS9TSmhTVE5wS2VnRU05YlUvM0hJcUIxWExYOVQ4Rjl4R285RlhYaVRrb0t5SUJmMElNcWplcHNoSDd6dEhtWlc5RE9XUjVPcjVLbW5DT0R4WjB3OFYwaHl3MGhmNnI2SUtOa1BjVnphM2N1UkZZeTlQMmU1RTN4Mlp0MHJtclNJTll6dUtKZXdmZHQ4bXhTSDRIWUlsTE1XNEV0VWVqbDltVTBSVVZUT1pnYjNuaDVKYlpKeTA4LzBEVHJva00yOERBQUE9In0= -->
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
 {"columns":[{"label":["submission"],"name":[1],"type":["chr"],"align":["left"]},{"label":["bayes"],"name":[2],"type":["dbl"],"align":["right"]}],"data":[{"1":"Hongyang Li and Yuanfang Guan","2":"0.0000"},{"1":"Gold Therapy","2":"141.8571"},{"1":"csabaibio","2":"Inf"},{"1":"Zbigniew Wojna","2":"Inf"},{"1":"Alpine Lads","2":"Inf"},{"1":"Team Shirin","2":"Inf"},{"1":"NAD","2":"Inf"},{"1":"Nc717","2":"Inf"},{"1":"zs_aicoe","2":"Inf"},{"1":"vladyorsh","2":"Inf"},{"1":"Aboensis V","2":"Inf"},{"1":"RA2 Baseline Model","2":"Inf"},{"1":"RYM","2":"Inf"},{"1":"kichuDL","2":"Inf"},{"1":"CU_DSI_RA2_Challenge","2":"Inf"}],"options":{"columns":{"min":{},"max":[10],"total":[2]},"rows":{"min":[10],"max":[10],"total":[15]},"pages":{}}}
@@ -3171,7 +3158,7 @@ bayes_top.sc3 &lt;- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) 
 <h3>Subchallenge 3</h3>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTUzA3RE1CQU5hVk5vK0JRQld5UmZvRUhBQXBZVUtqNVN5NktVNzZhYUpLWXh1SFlWcDBEWndKNWJjQXhPeEJJdVFCbTNOb0xzc1JSNzVzMjhtY3luVmIvWTlDOTh4M0VLVGxIZkhsNk9kOXJlcjI0N1R0RkZaUW9OWmYwK29Ia1pCUTB1NGxjeGhya0R5V1BTVG1nSy9hSEJ5cEdDRUZqSXBBRldENlhvRGtGMFNZTVJFREc1SElDNDF2b0JDc1pwdGsyaFIwNFNsaklMTFZ5RnJDc1l2U2ZuOGthQWRhenhQaE9VTkNCV0Jpb2MxK3BHOUk2anJmVXRvOHc4cWc2d1NGS2pMN1ZxRzJRWEZPVTZRRlBHbEJ2TDlDMkxra0c5WVZTL0Zrb3FGRlBrektab1hUWnRmWGNjNHFGTVZXS0FsYjNUVHYza3FJUFJPM3NKY0U1Rmwrci9IemZLbkIwU3ZMeSt2NjA5ZlV6MC8zNXpFL1FFOUtneTAzTnRtV29ROXBoU1ROcVdleUVNdGRzZmJqbVY5NEhsejJ2K00xNmowZWd6bnlUaW9Hd1NDL294WkJCY3A4aEg3U3RIbVpiOUROTWp5ZFg3VmRLRXNYbHlmZ2VhU25OQVpTRDBYOFZWSEoyNHJXN211UE5HcnZ5UzNVbDZkMlJDbFV5b0lvMFN1NjRsSEIvdWg2MkpRL2l6Smd2WWlYRWpnajZ1YVdZclJGUUZtY3pBK3ZtUjVCWVoxK3g4ZlFOdFpWemJiZ01BQUE9PSJ9 -->
+<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9kZiIsInRibCIsImRhdGEuZnJhbWUiXSwibmNvbCI6MiwibnJvdyI6MTV9LCJyZGYiOiJINHNJQUFBQUFBQUFBN1ZTUzA3RE1CQU5hVk5vK0JRQld5UmZvRUhBQXBZVUtncFNZVkhLZDFOTkV0TVlYTHVLVTZCc1lNOHRPQVluWWdrWG9JeGJHMEgyV0lvOTgyYmVUT2JUcWw5cytoZSs0emdGcDZodkR5L0hPMjN2VjdjZHAraWlNb1dHc240ZjBMeU1nZ1lYOGFzWXcxeEQ4cGkwRTVwQ2YyaXdjcVFnQkJZeWFZRFZBeW02UXhCZDBtUUVSRXd1QnlDdXRkNUF3VGpOdGluMHlFbkNVbWFoaGF1UWRRV2o5K1JjM2dpd2pqWGVaNEtTSnNUS1FJWGpXdDJJM25HMHRiNWxsSmxIMVFFV1NXcjBwVlp0Zyt5Q29sd0hPSkl4NWNZeWZjdWlaRkJ2R3RXdmhaSUt4UlE1c3lsYWwwZTJ2anNPOFZDbUtqSEF5dDVwcDM1eTJNSG9uYjBFT0tlaVMvWC9qeHRsemc0SlhsN2YzOWFlUGliNmY3KzVDWG9DZWxTWjZibTJURFVJZTB3cEptM0x2UkNHMnUwUHQ1eksrOER5NXpYL0dhL1JhUFNaVHhKeFVEYUpCZjBZTWdpdVUrU2o5cFdqVE10K2h1bVI1T3I5S21uQzJEdzV2d05OcFRsZ2NTRDBYOFZWSEoyNHJhNXY1c2p6UnE3OGt0MUpmbmRrWXBWTXJDS05FcnV2Slp3ZkxvZ3Rpa1A0c3ljTDJJcHhKNEkrN21sbVMwUlVCWm5Nd1ByNWtlUVdHUmZ0ZkgwRGtiOEc2VzhEQUFBPSJ9 -->
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
 {"columns":[{"label":["submission"],"name":[1],"type":["chr"],"align":["left"]},{"label":["bayes"],"name":[2],"type":["dbl"],"align":["right"]}],"data":[{"1":"Gold Therapy","2":"0.000000"},{"1":"csabaibio","2":"8.090909"},{"1":"Hongyang Li and Yuanfang Guan","2":"Inf"},{"1":"Team Shirin","2":"Inf"},{"1":"Zbigniew Wojna","2":"Inf"},{"1":"Alpine Lads","2":"Inf"},{"1":"NAD","2":"Inf"},{"1":"Nc717","2":"Inf"},{"1":"zs_aicoe","2":"Inf"},{"1":"RA2 Baseline Model","2":"Inf"},{"1":"kichuDL","2":"Inf"},{"1":"Aboensis V","2":"Inf"},{"1":"RYM","2":"Inf"},{"1":"vladyorsh","2":"Inf"},{"1":"CU_DSI_RA2_Challenge","2":"Inf"}],"options":{"columns":{"min":{},"max":[10],"total":[2]},"rows":{"min":[10],"max":[10],"total":[15]},"pages":{}}}
