@@ -220,6 +220,24 @@ bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
   rename(bayes = value) 
 ```
 
+### Subchallenge 1
+
+```{r echo=FALSE}
+bayes_top.sc1
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE}
+bayes_top.sc2
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE}
+bayes_top.sc3
+```
+
 ## Plot Results
 
 Plot boxplot of all scores, coloring the boxes by Bayes factor. 
@@ -257,4 +275,11 @@ plot_results <- function(results, bayes, subchallenge) {
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
 plot_results(boot.sc2, bayes_top.sc2, "SC2")
 plot_results(boot.sc3, bayes_top.sc3, "SC3")
+```
+
+Visuals are a bit unclear between the top performers and the second-top performers for SC1 and SC3, so zooming in on the plots a little bit.
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc1[,1:6], bayes_top.sc1, "SC1")
+plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
 ```
