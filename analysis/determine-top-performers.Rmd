@@ -265,6 +265,7 @@ computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
 }
 
 
+
 ```
 
 ---
@@ -320,10 +321,28 @@ plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
 
 Additionally, test the significance by performing a pairwise t-test across all predictions.
 
+### Subchallenge 1
+
 ```{r echo=FALSE}
-apply(boot.sc1, 2, function(col_x) { 
-    apply(boot.sc1, 2, function(col_y) { 
-        t.test(col_x, col_y, paired=T)$p.value
-    })
-}) %>% as_tibble(rownames = "team")
+pairwise_ttest <- function(boot) {
+  apply(boot, 2, function(col_x) { 
+      apply(boot, 2, function(col_y) { 
+          t.test(col_x, col_y, paired=T)$p.value
+      })
+  }) %>% as_tibble(rownames = "team")
+}
+
+pairwise_ttest(boot.sc1)
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE}
+pairwise_ttest(boot.sc2)
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE}
+pairwise_ttest(boot.sc3)
 ```
