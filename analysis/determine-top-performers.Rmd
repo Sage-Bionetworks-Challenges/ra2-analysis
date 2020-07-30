@@ -88,6 +88,8 @@ gold_joints <- gold %>%
   gather('joint', 'score', -Patient_ID, -weight)
 ```
 
+---
+
 ## Bootstrap Submissions
 
 Read in prediction files, combine, then bootstrap the predictions + a gold standard 1000 times to calculate 1000 scores per prediction. 
@@ -199,6 +201,8 @@ boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
   t()
 ```
 
+---
+
 ## Bayes Factor Analysis
 
 Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the top prediction (the reference prediction).
@@ -237,6 +241,33 @@ bayes_top.sc2
 ```{r echo=FALSE}
 bayes_top.sc3
 ```
+
+Compute Bayes factor again, but this time, use each column as the point of reference. Some tweaking to the computation will be required, as the reference index is no longer the best, which in consequence, means the inversion of K will be dependent on which submission it is being compared with.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
+                               refPredIndex,
+                               invertBayes){
+
+    M <- as.data.frame(bootstrapMetricMatrix - bootstrapMetricMatrix[,refPredIndex])
+    K <- apply(M ,2, function(x) {
+      k <- sum(x >= 0)/sum(x < 0)
+      if(sum(x >= 0) > sum(x < 0)){
+      return(k)
+      }else{
+      return(1/k)
+      }
+    })
+    if(invertBayes == T){K <- 1/K}
+    K[refPredIndex] <- 0
+
+    return(K)
+}
+
+
+```
+
+---
 
 ## Plot Results
 
@@ -282,4 +313,17 @@ Visuals are a bit unclear between the top performers and the second-top performe
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc1[,1:6], bayes_top.sc1, "SC1")
 plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
+```
+
+
+## Pairwise T-test
+
+Additionally, test the significance by performing a pairwise t-test across all predictions.
+
+```{r echo=FALSE}
+apply(boot.sc1, 2, function(col_x) { 
+    apply(boot.sc1, 2, function(col_y) { 
+        t.test(col_x, col_y, paired=T)$p.value
+    })
+}) %>% as_tibble(rownames = "team")
 ```
