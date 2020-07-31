@@ -1,0 +1,174 @@
+---
+title: "Test methods for reproducibility"
+author: "Robert Allaway, Thomas Yu (Sage Bionetworks)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_fold: hide
+    df_print: paged
+    toc: yes
+    toc_float: yes
+---
+
+# Introduction 
+
+One concern raised by the challenge committee is that models may be fitting predictions to a preconceived distribution or expected set of values, which would mean that the predictions will not be reproducible when run on different subsets of the same data. 
+
+To test this, we took the final models, and got predictions for the models run on the leaderboard dataset as well as the fast-lane dataset, which is a 10-patient subset of the leaderboard dataset. 
+
+We can get the predictions for matching joints, calculate the spearman correlation between the two prediction sets for each team, and get an idea of whether the predictions are substantially different or not. 
+
+# Results
+
+First, load packages: 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(98109)
+
+library(tidyverse)
+library(reticulate)
+library(challengescoring)
+library(ggplot2)
+library(reactable)
+
+# Synapse setup to use `reticulate`
+use_condaenv("synapse-2")
+synapseclient <- reticulate::import('synapseclient')
+challengeutils <- reticulate::import('challengeutils')
+syn <- synapseclient$Synapse()
+```
+
+```{r include = F}
+syn$login('ra2dreamservice', '###')
+```
+
+Thomas Yu re-ran the all of the final models on the leaderboard. 
+
+Retrieve new (final model run on fast lane dataset) and old (final round models run on leaderboard dataset) prediction file ids.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+new_predictions <- tibble::tribble(
+~newId,~prediction_fileid,~team,~id,
+"9706112","syn22269911","Hongyang Li and Yuanfang Guan",9705647,
+"9706113","syn22269760","CU_DSI_RA2_Challenge",9705644,
+"9706114","syn22269726","RYM",9705642,
+"9706115","syn22269788","Team Shirin",9705639,
+"9706116","syn22270007","Aboensis V",9705638,
+"9706117","syn22269959","Zbigniew Wojna",9705573,
+"9706118","syn22269938","Alpine Lads",9705556,
+"9706119","syn22269993","kichuDL",9705546,
+"9706120","syn22270215","Nc717",9705454,
+"9706121","syn22270026","NAD",9705412,
+"9706122","syn22270412","akshat85",9704854,
+"9706123","syn22270653","vladyorsh",9704778,
+"9706124","syn22270182","csabaibio",9704597,
+"9706125","syn22270261","Gold Therapy",9704323
+)
+
+old_predictions <- syn$tableQuery('SELECT * FROM syn22236264')$filepath %>% 
+  read_csv() %>% 
+  select(id, prediction_fileid) %>% 
+  mutate(old_prediction_fileid = glue::glue("{prediction_fileid}"), .keep = c('unused'))
+
+predictions <- inner_join(new_predictions, old_predictions)
+```
+
+Retrieve the predictions, `gather` them so that we can `inner_join` them on patient ID x variable.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+comparisons <- apply(predictions, 1, function(x){
+  
+  fastlane <- syn$get(x['prediction_fileid'])$path %>% 
+    read_csv %>% 
+    gather(variable, prediction, -Patient_ID) %>% 
+    rename(fastlane_prediction = prediction)
+  
+  leaderboard <- syn$get(x['old_prediction_fileid'], version = 1)$path %>% 
+    read_csv %>% 
+    gather(variable, prediction, -Patient_ID) %>% 
+    rename(leaderboard_prediction = prediction)
+  
+  inner_join(fastlane, leaderboard) %>% 
+    mutate(team = x['team']) %>%
+    filter(variable != 'Overall_erosion') %>% 
+    filter(variable != "Overall_narrowing")
+  #remove Overall Erosion and Overall Narrowing as they are not technically in the challenge scoring
+})
+
+```
+
+# Subchallenge-specific results 
+
+## SC1
+
+Calculate correlation and plot for SC1 predictions. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+cors <- lapply(comparisons, function(x){
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  c("team" = unique(x$team), "spearman" = sp$estimate[[1]], "pval" = sp$p.value)
+}) %>% bind_rows
+
+reactable::reactable(cors, sortable = T)
+
+lapply(comparisons, function(x){
+  team <- unique(x['team'])
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  ggplot(x) +
+    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
+    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
+}) 
+
+
+
+```
+
+## SC2
+
+Calculate correlation and plot for SC2 predictions .
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+cors <- lapply(comparisons, function(x){
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  c("team" = unique(x$team), "spearman" = sp$estimate[[1]], "pval" = sp$p.value)
+}) %>% bind_rows
+
+reactable::reactable(cors, sortable = T)
+
+lapply(comparisons, function(x){
+  team <- unique(x['team'])
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  ggplot(x) +
+    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
+    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
+}) 
+
+
+```
+
+## SC3
+
+Calculate and plot correlation for SC3 predictions.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+cors <- lapply(comparisons, function(x){
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  c("team" = unique(x$team), "spearman" = sp$estimate[[1]], "pval" = sp$p.value)
+}) %>% bind_rows
+
+reactable::reactable(cors, sortable = T)
+
+lapply(comparisons, function(x){
+  team <- unique(x['team'])
+  sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
+  ggplot(x) +
+    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
+    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
+}) 
+
+
+```
