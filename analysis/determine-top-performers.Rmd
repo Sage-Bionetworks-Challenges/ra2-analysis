@@ -377,7 +377,7 @@ sc2.pvals %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
 sc2.pvals
-reactable(sc2.pvals)
+reactable(sc2.pvals, sortable=TRUE)
 ```
 
 ### Subchallenge 3
@@ -389,5 +389,5 @@ sc3.pvals %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
 sc3.pvals
-reactable(sc3.pvals)
+reactable(sc3.pvals, sortable=TRUE)
 ```
