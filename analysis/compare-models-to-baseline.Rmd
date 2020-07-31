@@ -1,6 +1,6 @@
 ---
 title: "Bootstrap analysis: determine which models are better than baseline"
-author: "Verena Chung"
+author: "Verena Chung, Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
   html_notebook:
@@ -32,7 +32,7 @@ syn <- synapseclient$Synapse()
 syn$login()
 ```
 
-### Functions 
+#### Functions 
 
 Additionally, define functions to help with the scoring algorithms.
 
@@ -71,7 +71,7 @@ score_weighted_rmse <- function(df, pred) {
 }
 ```
 
-### Goldstandard
+#### Goldstandard
 
 The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
 
@@ -122,11 +122,10 @@ pred_filenames <- lapply(query$prediction_fileid, function(id) {
   syn$get(id)$path
 })
 names(pred_filenames) <- team_names
-```
 
-Before bootstrapping, rearrange the teams by rank, where left = better performance and right = not-as-great performance.
+# Before bootstrapping, rearrange the teams by rank, where left = better 
+# performance and right = not-as-great performance.
 
-```{r echo=TRUE, message=FALSE, warning=FALSE}
 ### SC1
 submissions.sc1 <- lapply(names(pred_filenames), function(team) {
   read.csv(pred_filenames[[team]]) %>% 
