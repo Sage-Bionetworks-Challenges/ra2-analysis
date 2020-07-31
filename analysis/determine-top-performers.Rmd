@@ -207,6 +207,8 @@ boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
 
 Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the top prediction (the reference prediction).
 
+In addition to computing BF against the top performer, we are also interested in comparing against all columns. Some tweaking to the computation will be required, as the reference index may no longer be the best, which in consequence, means the inversion of K will be dependent on which submission it is being compared with.
+
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 # Top performer: Team Shirin
 bayes_top.sc1 <- computeBayesFactor(boot.sc1, refPredIndex=1, invertBayes=F) %>%
@@ -222,29 +224,7 @@ bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
 bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value) 
-```
 
-### Subchallenge 1
-
-```{r echo=FALSE}
-bayes_top.sc1
-```
-
-### Subchallenge 2
-
-```{r echo=FALSE}
-bayes_top.sc2
-```
-
-### Subchallenge 3
-
-```{r echo=FALSE}
-bayes_top.sc3
-```
-
-Compute Bayes factor again, but this time, use each column as the point of reference. Some tweaking to the computation will be required, as the reference index is no longer the best, which in consequence, means the inversion of K will be dependent on which submission it is being compared with.
-
-```{r echo=TRUE, message=FALSE, warning=FALSE}
 computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
                                refPredIndex,
                                invertBayes){
@@ -264,9 +244,38 @@ computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
     return(K)
 }
 
-
-
+bayesFactorMatrix <- function(bootstrapMatrix) {
+  names <- colnames(bootstrapMatrix)
+  results <- purrr::map(1:ncol(bootstrapMatrix), function(ind) {
+    computeBayesFactorWhereRefIsNotBest(bootstrapMatrix, refPredIndex=ind, invertBayes=F) %>%
+      as.data.frame()
+}) %>% bind_cols
+  colnames(results) <- names
+  results
+}
 ```
+
+### Subchallenge 1
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc1
+bayesFactorMatrix(boot.sc1)
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc2
+bayesFactorMatrix(boot.sc2)
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc3
+bayesFactorMatrix(boot.sc3)
+```
+
 
 ---
 
