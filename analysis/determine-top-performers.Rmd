@@ -1,6 +1,6 @@
 ---
 title: "Bootstrap analysis: Determine top performers"
-author: "Verena Chung"
+author: "Verena Chung, Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
   html_notebook:
@@ -25,6 +25,7 @@ library(tidyverse)
 library(reticulate)
 library(challengescoring)
 library(ggplot2)
+library(reactable)
 
 # Synapse setup to use `reticulate`
 use_condaenv("synapse")
@@ -33,7 +34,7 @@ syn <- synapseclient$Synapse()
 syn$login()
 ```
 
-### Functions 
+#### Functions 
 
 Additionally, define functions to help with the scoring algorithms.
 
@@ -72,7 +73,7 @@ score_weighted_rmse <- function(df, pred) {
 }
 ```
 
-### Goldstandard
+#### Goldstandard
 
 The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
 
@@ -125,11 +126,10 @@ pred_filenames <- lapply(query$prediction_fileid, function(id) {
   syn$get(id)$path
 })
 names(pred_filenames) <- team_names
-```
 
-Before bootstrapping, rearrange the teams by rank, where left = better performance and right = not-as-great performance.
+# Before bootstrapping, rearrange the teams by rank, where left = better 
+# performance and right = not-as-great performance.
 
-```{r echo=TRUE, message=FALSE, warning=FALSE}
 ### SC1
 submissions.sc1 <- lapply(names(pred_filenames), function(team) {
   read.csv(pred_filenames[[team]]) %>% 
@@ -303,25 +303,32 @@ plot_results <- function(results, bayes, subchallenge) {
     coord_flip() +
     labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
 }
-
-plot_results(boot.sc1, bayes_top.sc1, "SC1")
-plot_results(boot.sc2, bayes_top.sc2, "SC2")
-plot_results(boot.sc3, bayes_top.sc3, "SC3")
 ```
 
-Visuals are a bit unclear between the top performers and the second-top performers for SC1 and SC3, so zooming in on the plots a little bit.
+### Subchallenge 1
 
 ```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc1, bayes_top.sc1, "SC1")
 plot_results(boot.sc1[,1:6], bayes_top.sc1, "SC1")
+```
+
+### Subchallenge 2
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc2, bayes_top.sc2, "SC2")
+```
+
+### Subchallenge 3
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc3, bayes_top.sc3, "SC3")
 plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
 ```
 
 
 ## Pairwise T-test
 
-Additionally, test the significance by performing a pairwise t-test across all predictions.
-
-### Subchallenge 1
+Additionally, test the significance by performing a pairwise t-test across all predictions, then plot.
 
 ```{r echo=FALSE}
 pairwise_ttest <- function(boot) {
@@ -329,20 +336,49 @@ pairwise_ttest <- function(boot) {
       apply(boot, 2, function(col_y) { 
           t.test(col_x, col_y, paired=T)$p.value
       })
-  }) %>% as_tibble(rownames = "team")
+  }) %>% as_tibble(rownames = "team_a") %>% 
+  mutate_all(~replace(., is.nan(.), 1)) %>%
+  gather(team_b, pval, -team_a) %>% 
+  mutate(fdr = signif(p.adjust(pval, "fdr"),3)) 
 }
 
-pairwise_ttest(boot.sc1)
+sc1.pvals <- pairwise_ttest(boot.sc1)
+sc2.pvals <- pairwise_ttest(boot.sc2)
+sc3.pvals <- pairwise_ttest(boot.sc3)
+```
+
+### Subchallenge 1
+
+```{r echo=FALSE}
+sc1.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc1.pvals
+reactable(sc1.pvals)
 ```
 
 ### Subchallenge 2
 
 ```{r echo=FALSE}
-pairwise_ttest(boot.sc2)
+sc2.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc2.pvals
+reactable(sc2.pvals)
 ```
 
 ### Subchallenge 3
 
 ```{r echo=FALSE}
-pairwise_ttest(boot.sc3)
+sc3.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc3.pvals
+reactable(sc3.pvals)
 ```
