@@ -67,7 +67,7 @@ gold <- syn$get("syn22254942")$path %>%
 
 # SC2 
 
-We are calculating p-values for SC2, and SC3, using a binning and empirical approach to ensure that we have enough statistical power for each measurement. 
+We are calculating p-values for SC2 using a binning and empirical approach to ensure that we have enough statistical power for each measurement. 
 
 First, obtain all joint narrowing predictions. 
 Then, assign each joint to a bins based on the mean predicted value for that joint. Each bin was defined by `smart_cut` to have 100 joints per bin. However, with the approach of converting all predictions to an integer value, there are hundreds of ties, meaning that there are actually far more than 100 joints per bin.
