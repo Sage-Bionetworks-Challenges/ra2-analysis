@@ -42,7 +42,7 @@ syn <- synapseclient$Synapse()
 syn$login('ra2dreamservice', '###')
 ```
 
-Thomas Yu re-ran the all of the final models on the leaderboard. 
+Thomas Yu re-ran all of the final models on the leaderboard. 
 
 Retrieve new (final model run on fast lane dataset) and old (final round models run on leaderboard dataset) prediction file ids.
 
