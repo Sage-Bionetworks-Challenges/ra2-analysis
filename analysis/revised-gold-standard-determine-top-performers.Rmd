@@ -1,5 +1,5 @@
 ---
-title: "Bootstrap analysis: determine which models are better than baseline"
+title: "Bootstrap analysis: Determine top performers"
 author: "Verena Chung, Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
@@ -10,9 +10,9 @@ output:
     toc_float: true
 ---
 
-## Introduction
+## Introduction 
 
-This is the same analysis as `determine-top-performers.Rmd`, but the `refPredIndex` for calculating the Bayes factor is set based on the baseline model. This will allow you to determine which models submitted were better than the baseline provided by the organizers. 
+In order to declare top-performers for a DREAM challenge, we need to assess if there are any "tied" methods, that is, methods that are not substantially different in performance. We determine this using a bootstrapping (sampling with replacement) approach to determing how a submission would score in different scenarios (that is - when only considering resampled sets of the values to be predicted). Specifically, we sample with replacement all of the submitted predictions and the gold standard and score the prediction files. We repeat this for at total of 1000-10000 samples to obtain a distribution of scores for each participant. We then calculate a Bayes factor relative to the best-scoring method, to see if any of the other methods are within a certain threshold. Smaller Bayes factors indicate more similar performance while larger Bayes factors indicate more disparate performance. We use a Bayes factor of 3 as a cutoff to indicate a tie. 
 
 ## Setup
 
@@ -23,7 +23,9 @@ set.seed(98109)
 
 library(tidyverse)
 library(reticulate)
+library(challengescoring)
 library(ggplot2)
+library(reactable)
 
 # Synapse setup to use `reticulate`
 use_condaenv("synapse")
@@ -76,7 +78,7 @@ score_weighted_rmse <- function(df, pred) {
 The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-gold <- read.csv(syn$get("syn22254942")$path) %>%
+gold <- read.csv(syn$get("syn22296988")$path) %>%
   mutate(weight = calculate_weight(Overall_Tol))
 
 gold.sc1 <- gold %>% 
@@ -86,6 +88,8 @@ gold_joints <- gold %>%
   select(-Overall_Tol) %>%
   gather('joint', 'score', -Patient_ID, -weight)
 ```
+
+---
 
 ## Bootstrap Submissions
 
@@ -197,11 +201,30 @@ boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
   t()
 ```
 
+---
+
 ## Bayes Factor Analysis
 
-The Bayes factor calculation for the analysis against the baseline model is a little bit more complicated because the reference is in the middle.  This consequently means that the inversion of K (BF) will be dependent on which submission is being compared to the baseline.
+Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the top prediction (the reference prediction).
+
+In addition to computing BF against the top performer, we are also interested in comparing against all columns. Some tweaking to the computation will be required, as the reference index may no longer be the best, which in consequence, means the inversion of K will be dependent on which submission it is being compared with.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Top performer: Team Shirin
+bayes_top.sc1 <- computeBayesFactor(boot.sc1, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+# Top performer: Hongyang Li and Yuanfang Guan (column 1)
+bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+# Top performer: Gold Therapy (column 1)
+bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value) 
+
 computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
                                refPredIndex,
                                invertBayes){
@@ -221,35 +244,40 @@ computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
     return(K)
 }
 
-# Baseline: RA2 Baseline Model (columns 15, 12 and 10)
-bayes_baseline.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=15, invertBayes=F) %>%
-  as_tibble(rownames = "submission") %>%
-  rename(bayes = value)
-
-bayes_baseline.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=12, invertBayes=F) %>%
-  as_tibble(rownames = "submission") %>%
-  rename(bayes = value)
-
-bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=10, invertBayes=F) %>%
-  as_tibble(rownames = "submission") %>%
-  rename(bayes = value)
+bayesFactorMatrix <- function(bootstrapMatrix) {
+  names <- colnames(bootstrapMatrix)
+  results <- purrr::map(1:ncol(bootstrapMatrix), function(ind) {
+    computeBayesFactorWhereRefIsNotBest(bootstrapMatrix, refPredIndex=ind, invertBayes=F) %>%
+      as.data.frame()
+}) %>% bind_cols
+  colnames(results) <- names
+  results
+}
 ```
 
-#### Subchallenge 1
-```{r echo=FALSE}
-bayes_baseline.sc1
+### Subchallenge 1
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc1
+bayesFactorMatrix(boot.sc1)
 ```
 
-#### Subchallenge 2
-```{r echo=FALSE}
-bayes_baseline.sc2
+### Subchallenge 2
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc2
+bayesFactorMatrix(boot.sc2)
 ```
 
-#### Subchallenge 3
-```{r echo=FALSE}
-bayes_baseline.sc3
+### Subchallenge 3
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc3
+bayesFactorMatrix(boot.sc3)
 ```
 
+
+---
 
 ## Plot Results
 
@@ -284,8 +312,82 @@ plot_results <- function(results, bayes, subchallenge) {
     coord_flip() +
     labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
 }
+```
 
-plot_results(boot.sc1, bayes_baseline.sc1, "SC1")
-plot_results(boot.sc2, bayes_baseline.sc2, "SC2")
-plot_results(boot.sc3, bayes_baseline.sc3, "SC3")
+### Subchallenge 1
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc1, bayes_top.sc1, "SC1")
+plot_results(boot.sc1[,1:6], bayes_top.sc1, "SC1")
+```
+
+### Subchallenge 2
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc2, bayes_top.sc2, "SC2")
+```
+
+### Subchallenge 3
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc3, bayes_top.sc3, "SC3")
+plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
+```
+
+
+## Pairwise T-test
+
+Additionally, test the significance by performing a pairwise t-test across all predictions, then plot.
+
+```{r echo=FALSE}
+pairwise_ttest <- function(boot) {
+  apply(boot, 2, function(col_x) { 
+      apply(boot, 2, function(col_y) { 
+          t.test(col_x, col_y, paired=T)$p.value
+      })
+  }) %>% as_tibble(rownames = "team_a") %>% 
+  mutate_all(~replace(., is.nan(.), 1)) %>%
+  gather(team_b, pval, -team_a) %>% 
+  mutate(fdr = signif(p.adjust(pval, "fdr"),3)) 
+}
+
+sc1.pvals <- pairwise_ttest(boot.sc1)
+sc2.pvals <- pairwise_ttest(boot.sc2)
+sc3.pvals <- pairwise_ttest(boot.sc3)
+```
+
+### Subchallenge 1
+
+```{r echo=FALSE}
+sc1.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc1.pvals
+reactable(sc1.pvals, sortable=TRUE)
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE}
+sc2.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc2.pvals
+reactable(sc2.pvals, sortable=TRUE)
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE}
+sc3.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc3.pvals
+reactable(sc3.pvals, sortable=TRUE)
 ```
