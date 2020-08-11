@@ -76,7 +76,7 @@ score_weighted_rmse <- function(df, pred) {
 The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-gold <- read.csv(syn$get("syn22254942")$path) %>%
+gold <- read.csv(syn$get("syn22296988")$path) %>%
   mutate(weight = calculate_weight(Overall_Tol))
 
 gold.sc1 <- gold %>% 
