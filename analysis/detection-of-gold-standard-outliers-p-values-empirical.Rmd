@@ -1,0 +1,345 @@
+---
+title: "Detection of Outlier SvH Scores - p-values"
+author: "Robert Allaway"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_fold: hide
+    toc: true
+    toc_float: true
+---
+
+# Introduction 
+
+In order to test the accuracy of the gold-standard data, we can leverage a wisdom-of-the-crowds approach where we compare the set of predicted values for a given measurement (e.g. all predicted values for Patient 001, Joint 001, erosion) to the gold standard measurement. We can calculate p-values for this population of predictions + gold standard value. If the p-value of the gold standard is considerably higher or lower than the rest of the population (i.e. very far from 0), it's possible that the gold standard measurement is incorrect. 
+
+First, load packages and download View of all submissions. We'll consider only the final submission for each team to avoid weighting towards teams that submitted multiple similar predictions. 
+
+We'll consider only the top half of submissions (top 8 of 15).
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(reticulate)
+library(reactable)
+use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+synapse <- import('synapseclient')
+syn <- synapse$Synapse()
+
+
+```
+
+```{r include=FALSE}
+#login
+syn$login('ra2dreamservice', '#####')
+
+```
+
+Retrieve the submissions, only considering the top 50% as determined by SC1. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+tab <- syn$tableQuery('select * from syn22236264')$filepath %>% 
+      readr::read_csv() %>% 
+  filter(status == "ACCEPTED") %>% 
+  group_by(submitterid) %>% 
+  top_n(1, createdOn) %>% 
+  ungroup %>% 
+  filter(submitterid != 3408914) %>% 
+  write_csv("submission_table.csv")
+
+top_methods <- tab %>% top_n(ceiling(nrow(tab)/2), -sc1_weighted_sum_error)
+
+submission <- lapply(top_methods$prediction_fileid, function(x){
+  syn$get(x)$path %>% 
+    readr::read_csv() %>% 
+    tidyr::gather(measurement, score, -Patient_ID) %>% 
+    mutate(prediction = {{x}})
+}) %>% bind_rows() %>% 
+  mutate(score = round(score))
+
+gold <- syn$get("syn22254942")$path %>% 
+   readr::read_csv() %>% 
+   tidyr::gather(measurement, score, -Patient_ID) %>% 
+  mutate(prediction = 'gold')
+
+```
+
+# SC2 
+
+We are calculating p-values for SC2 using a binning and empirical approach to ensure that we have enough statistical power for each measurement. 
+
+First, obtain all joint narrowing predictions. 
+Then, assign each joint to a bins based on the mean predicted value for that joint. Each bin was defined by `smart_cut` to have 100 joints per bin. However, with the approach of converting all predictions to an integer value, there are hundreds of ties, meaning that there are actually far more than 100 joints per bin.
+
+Plot a box of the bins where x axis is the bin, and the y axis is the mean predicted score of each joint
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+submission_sc2 <- submission %>% 
+  group_by(Patient_ID, measurement) %>%
+  mutate(measurement_type = case_when(grepl('.+_J__.+', measurement) ~ "narrowing",
+                                      grepl('.+_E__.+', measurement) ~ "erosion",
+                                      grepl(".+verall.+", measurement) ~ "overall")) %>% 
+  filter(grepl('.+_J__.+', measurement)) %>%
+  summarize(mean_score = mean(score)) %>% 
+  ungroup() %>% 
+  mutate(bin = cutr::smart_cut(mean_score, i = 100, "n_by_group") %>% as.numeric())
+  
+submission_bins<- submission %>% 
+  inner_join(submission_sc2) %>% 
+  group_by(bin) %>% 
+  mutate(pvalue = (length(score)))
+
+gold_bins <- gold %>% 
+  inner_join(submission_sc2) 
+
+ggplot(data = submission_sc2) +
+   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+
+
+```
+
+Repeat the boxplot, but evaluating individual predicted scores in each bin:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(data = submission_bins) +
+   geom_boxplot(aes(x = as_factor(bin), y = score))
+  
+```
+
+Then, calculate an empirical p-value for each gold standard value as compared to the rest of the bins. The formula is p = r+1/n+1 where r is the number of predicted values greater than or equal to the gold standard within each bin, and n is the total number of predicted values. 
+
+Then, FDR adjust the full set of p-values. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+pvals <- lapply(submission_sc2$bin %>% unique, function(y){
+
+  sub_preds <- submission_bins%>% filter(bin == y)
+  golds <- gold_bins %>% filter(bin == y)
+  
+  pvals <- sapply(golds$score, function(x){
+    
+  subs <- sub_preds$score
+  test <- (length(subs[subs>=x])+1)/(length(subs)+1)
+  
+})
+  res <- golds %>% mutate(pvalue = pvals)
+}) %>% 
+  bind_rows %>% 
+  ungroup %>% 
+  mutate(fdr = p.adjust(pvalue, method= "fdr")) %>% 
+  mutate(pvalue = signif(pvalue, 3), fdr = signif(fdr, 3)) %>% 
+  mutate(mean_score = signif(mean_score, 3)) %>% 
+  mutate(diff = mean_score - score)
+
+```
+
+Plot the FDR adjusted p-values. x = bold standard bin, y = gold standard SvH score, color = whether the FDR adjusted p-value is under 0.05.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(pvals) +
+  geom_point(aes(x = as_factor(bin), color = fdr < 0.05, y = score)) +
+  theme_bw() +
+  ggtitle("SC2 Gold Standard Scores")
+
+
+pvals %>% 
+  arrange(fdr) %>% 
+  reactable(sortable = T, filterable = F, bordered = T, compact = T,
+          style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+
+write_csv(pvals, "sc2_empirical_pvalues.csv")
+
+glue::glue("Number of gold standard measurements with FDR <0.05: {nrow(pvals[pvals$fdr<0.05,])}")
+glue::glue("Percent of gold standard measurements with FDR <0.05: {round((nrow(pvals[pvals$fdr<0.05,])/nrow(pvals)),3)*100}%")
+```
+
+# SC3
+
+We are calculating p-values for SC3, using a binning and empirical approach to ensure that we have enough statistical power for each measurement. 
+
+First, obtain all joint erosion predictions. 
+Then, assign each joint to a bins based on the mean predicted value for that joint. Each bin was defined by `smart_cut` to have 100 joints per bin. However, with the approach of converting all predictions to an integer value, there are hundreds of ties, meaning that there are actually far more than 100 joints per bin.
+
+Plot a box of the bins where x axis is the bin, and the y axis is the mean predicted score of each joint
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+submission_sc3 <- submission %>% 
+  group_by(Patient_ID, measurement) %>%
+  mutate(measurement_type = case_when(grepl('.+_J__.+', measurement) ~ "narrowing",
+                                      grepl('.+_E__.+', measurement) ~ "erosion",
+                                      grepl(".+verall.+", measurement) ~ "overall")) %>% 
+  filter(grepl('.+_E__.+', measurement)) %>%
+  summarize(mean_score = mean(score)) %>% 
+  ungroup() %>% 
+  mutate(bin = cutr::smart_cut(mean_score, i = 100, "n_by_group") %>% as.numeric())
+  
+submission_bins<- submission %>% 
+  inner_join(submission_sc3) %>% 
+  group_by(bin) %>% 
+  mutate(pvalue = (length(score)))
+
+gold_bins <- gold %>% 
+  inner_join(submission_sc3) 
+
+ggplot(data = submission_sc3) +
+   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+
+```
+
+Repeat the boxplot, but evaluating individual predicted scores in each bin:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(data = submission_bins) +
+   geom_boxplot(aes(x = as_factor(bin), y = score))
+  
+```
+
+Then, calculate an empirical p-value for each gold standard value as compared to the rest of the bins. The formula is p = r+1/n+1 where r is the number of predicted values greater than or equal to the gold standard within each bin, and n is the total number of predicted values. 
+
+Then, FDR adjust the full set of p-values. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+pvals <- lapply(submission_sc3$bin %>% unique, function(y){
+
+  sub_preds <- submission_bins%>% filter(bin == y)
+  golds <- gold_bins %>% filter(bin == y)
+  
+  pvals <- sapply(golds$score, function(x){
+    
+  subs <- sub_preds$score
+  test <- (length(subs[subs>=x])+1)/(length(subs)+1)
+  
+})
+  res <- golds %>% mutate(pvalue = pvals)
+}) %>% 
+  bind_rows %>% 
+  ungroup %>% 
+  mutate(fdr = p.adjust(pvalue, method= "fdr")) %>% 
+  mutate(pvalue = signif(pvalue, 3), fdr = signif(fdr, 3)) %>% 
+  mutate(mean_score = signif(mean_score, 3)) %>% 
+  mutate(diff = mean_score - score)
+
+```
+
+Plot the FDR adjusted p-values. x = bold standard bin, y = gold standard SvH score, color = whether the FDR adjusted p-value is under 0.05.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(pvals) +
+  geom_point(aes(x = as_factor(bin), color = fdr < 0.05, y = score)) +
+  theme_bw() +
+  ggtitle("SC3 Gold Standard Scores")
+
+
+pvals %>% 
+  arrange(fdr) %>% 
+  reactable(sortable = T, filterable = F, bordered = T, compact = T,
+          style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+
+write_csv(pvals, "sc3_empirical_pvalues.csv")
+
+glue::glue("Number of gold standard measurements with FDR <0.05: {nrow(pvals[pvals$fdr<0.05,])}")
+glue::glue("Percent of gold standard measurements with FDR <0.05: {round((nrow(pvals[pvals$fdr<0.05,])/nrow(pvals)),3)*100}%")
+```
+
+
+# SC1 
+
+We are calculating p-values for SC1  using a binning and empirical approach to ensure that we have enough statistical power for each measurement. 
+
+First, obtain all overall predictions. 
+Then, assign each patient to a bin based on the mean predicted value for that patients Each bin was set to have 25 patients assigned to it. I tried this using a quantile approach but the ranges of mean scores in each bin was very unbalanced using this approach. 
+
+Plot a box of the bins where x axis is the bin, and the y axis is the mean predicted score of each joint
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+submission_sc1 <- submission %>% 
+  group_by(Patient_ID, measurement) %>%
+  mutate(measurement_type = case_when(grepl('.+_J__.+', measurement) ~ "narrowing",
+                                      grepl('.+_E__.+', measurement) ~ "erosion",
+                                      grepl(".+verall.+", measurement) ~ "overall")) %>% 
+  filter(grepl('Overall_Tol', measurement)) %>%
+  summarize(mean_score = mean(score)) %>% 
+  ungroup() %>% 
+  mutate(bin = cutr::smart_cut(mean_score, i = 25, "n_by_group") %>% as.numeric())
+  
+submission_bins<- submission %>% 
+  inner_join(submission_sc1) %>% 
+  group_by(bin) %>% 
+  mutate(pvalue = (length(score)))
+
+gold_bins <- gold %>% 
+  inner_join(submission_sc1) 
+
+ggplot(data = submission_sc1) +
+   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+
+```
+
+Repeat the boxplot, but evaluating individual predicted scores in each bin:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(data = submission_bins) +
+   geom_boxplot(aes(x = as_factor(bin), y = score))
+  
+```
+
+Then, calculate an empirical p-value for each gold standard value as compared to the rest of the bins. The formula is p = r+1/n+1 where r is the number of predicted values greater than or equal to the gold standard within each bin, and n is the total number of predicted values. 
+
+Then, FDR adjust the full set of p-values. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+pvals <- lapply(submission_sc1$bin %>% unique, function(y){
+
+  sub_preds <- submission_bins%>% filter(bin == y)
+  golds <- gold_bins %>% filter(bin == y)
+  
+  pvals <- sapply(golds$score, function(x){
+    
+  subs <- sub_preds$score
+  test <- (length(subs[subs>=x])+1)/(length(subs)+1)
+  
+})
+  res <- golds %>% mutate(pvalue = pvals)
+}) %>% 
+  bind_rows %>% 
+  ungroup %>% 
+  mutate(fdr = p.adjust(pvalue, method= "fdr")) %>% 
+  mutate(pvalue = signif(pvalue, 3), fdr = signif(fdr, 3)) %>% 
+  mutate(mean_score = signif(mean_score, 3)) %>% 
+  mutate(diff = mean_score - score)
+
+```
+
+Plot the FDR adjusted p-values. x = bold standard bin, y = gold standard SvH score, color = whether the FDR adjusted p-value is under 0.1.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ggplot(pvals) +
+  geom_point(aes(x = as_factor(bin), color = fdr < 0.1, y = score)) +
+  theme_bw() +
+  ggtitle("SC1 Gold Standard Scores")
+
+
+pvals %>% 
+  arrange(fdr) %>% 
+  reactable(sortable = T, filterable = F, bordered = T, compact = T,
+          style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+
+write_csv(pvals, "sc1_empirical_pvalues.csv")
+
+glue::glue("Number of gold standard measurements with FDR <0.1: {nrow(pvals[pvals$fdr<0.1,])}")
+glue::glue("Percent of gold standard measurements with FDR <0.1: {round((nrow(pvals[pvals$fdr<0.1,])/nrow(pvals)),3)*100}%")
+```

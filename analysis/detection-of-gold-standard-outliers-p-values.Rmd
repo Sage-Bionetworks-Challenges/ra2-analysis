@@ -1,0 +1,177 @@
+---
+title: "Detection of Outlier SvH Scores - p-values"
+author: "Robert Allaway"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    code_fold: hide
+    toc: true
+    toc_float: true
+---
+
+# Introduction 
+
+In order to test the accuracy of the gold-standard data, we can leverage a wisdom-of-the-crowds approach where we compare the set of predicted values for a given measurement (e.g. all predicted values for Patient 001, Joint 001, erosion) to the gold standard measurement. We can calculate p-values for this population of predictions + gold standard value. If the p-value of the gold standard is considerably higher or lower than the rest of the population (i.e. very far from 0), it's possible that the gold standard measurement is incorrect. 
+
+First, load packages and download View of all submissions. We'll consider only the final submission for each team to avoid weighting towards teams that submitted multiple similar predictions. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(reticulate)
+library(reactable)
+use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+synapse <- import('synapseclient')
+syn <- synapse$Synapse()
+
+
+```
+
+```{r include=FALSE}
+#login
+syn$login('ra2dreamservice', '#####')
+
+```
+
+Then, calculate the p-values for each prediction and gold standard value, grouped by Patient_ID and measurement (i.e. p-values calculated within each group, not across every group).
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+tab <- syn$tableQuery('select * from syn22236264')$filepath %>% 
+      readr::read_csv() %>% 
+  filter(status == "ACCEPTED") %>% 
+  group_by(submitterid) %>% 
+  top_n(1, createdOn) %>% 
+  ungroup %>% 
+  write_csv("submission_table.csv")
+
+top_methods <- tab %>% top_frac(0.5, -sc1_weighted_sum_error)
+
+submission <- lapply(top_methods$prediction_fileid, function(x){
+  syn$get(x)$path %>% 
+    readr::read_csv() %>% 
+    tidyr::gather(measurement, score, -Patient_ID) %>% 
+    mutate(prediction = {{x}})
+}) %>% bind_rows() %>% write_csv("submissions.csv")
+
+gold <- syn$get("syn22254942")$path %>% 
+   readr::read_csv() %>% 
+   tidyr::gather(measurement, score, -Patient_ID) %>% 
+   rename(gold = score)
+
+submission_pval<- left_join(submission, gold) %>% 
+  group_by(Patient_ID, measurement) %>% 
+  mutate(pvalue = t.test(score, mu = unique(gold))$p.value) %>% 
+    mutate(mean_prediction = signif(mean(score),3)) %>% 
+  select(Patient_ID, measurement, gold, pvalue, mean_prediction) %>% 
+  distinct() %>% 
+  ungroup() %>% 
+  mutate(fdr = p.adjust(pvalue, method= "fdr")) %>% 
+  mutate(pvalue = signif(pvalue, 3), fdr = signif(fdr, 3))
+
+```
+
+# SC1 
+
+Plot the SC1 gold standard p-values. The p-values for these Overall_Tol values are not too high - I would surmise because these values are the sum of a large number of measurements, and thus are "buffered" from large changes caused by individual joint measurement errors. 
+
+The table below shows the same data. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+p <-ggplot(submission_pval %>% 
+         filter(measurement == "Overall_Tol")) +
+  geom_point(aes(x = gold, y = fdr, text = Patient_ID, label = measurement)) +
+  theme_bw() +
+  ggtitle("SC1 Gold Standard p-values")
+  
+plotly::ggplotly(p)
+
+p <-ggplot(submission_pval %>% 
+         filter(measurement == "Overall_Tol")) +
+  geom_point(aes(x = gold, y = mean_prediction, text = Patient_ID, label = measurement)) +
+  theme_bw() +
+  ggtitle("SC1 Gold Standard vs mean prediction")
+  
+plotly::ggplotly(p)
+# submission_zscores %>% 
+#          filter(prediction=="gold") %>% 
+#          filter(measurement == "Overall_Tol") %>%
+#         select(-prediction) %>% 
+#   arrange(desc(zscore)) %>% 
+#   reactable(sortable = T, filterable = F, bordered = T, compact = T,
+#           style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+
+```
+
+# SC2
+
+Plot the SC2 gold standard p-values. This plot is not interactive because there are many data points. 
+The table at the end of this document shows the same data for SC2 joint narrowing gold standard scores and is sortable.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+p <-ggplot(submission_pval %>% 
+         filter(grepl('.+_J__.+', measurement)) %>% 
+           filter(fdr < 0.05)) +
+  geom_point(aes(x = gold, y = fdr, text = Patient_ID, label = measurement)) +
+  theme_bw() +
+  ggtitle("SC2 (narrowing) Gold Standard FDR p-values < 0.05 (x-axis jittered)")
+
+p
+
+p <-ggplot(submission_pval %>% 
+         filter(grepl('.+_J__.+', measurement)) %>% 
+           filter(fdr < 0.05)) +
+  geom_jitter(aes(x = gold, y = mean_prediction, text = Patient_ID, label = measurement), width = 0.25) +
+  theme_bw() +
+  ggtitle("SC2 (narrowing) Gold Standard vs mean Prediction (x-axis jittered)")
+
+p
+
+submission_pval %>% 
+  filter(grepl('.+_J__.+', measurement))  %>%
+  arrange(fdr) %>% 
+  reactable(sortable = T, filterable = F, bordered = T, compact = T,
+          style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+```
+
+
+# SC3
+
+Plot the SC3 gold standard p-values. This plot is not interactive because there are many data points. 
+The table at the end of this document shows the same data for SC3 joint narrowing gold standard scores and is sortable.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+p <-ggplot(submission_pval %>% 
+         filter(grepl('.+_E__.+', measurement)) %>% 
+           filter(fdr < 0.05)) +
+  geom_point(aes(x = gold, y = fdr, text = Patient_ID, label = measurement)) +
+  theme_bw() +
+  ggtitle("SC3 (narrowing) Gold Standard FDR p-values < 0.05 (x-axis jittered)")
+
+p
+
+p <-ggplot(submission_pval %>% 
+         filter(grepl('.+_E__.+', measurement)) %>% 
+           filter(fdr < 0.05)) +
+  geom_jitter(aes(x = gold, y = mean_prediction, text = Patient_ID, label = measurement), width = 0.25) +
+  theme_bw() +
+  ggtitle("SC3 (narrowing) Gold Standard vs mean Prediction (x-axis jittered)")
+
+p
+
+submission_pval %>% 
+  filter(grepl('.+_E__.+', measurement))  %>%
+  arrange(fdr) %>% 
+  reactable(sortable = T, filterable = F, bordered = T, compact = T,
+          style = list(fontFamily = "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif"))
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+write_csv(submission_pval %>%  
+          arrange(fdr),
+  'gold_standard_p_values.csv')
+```
