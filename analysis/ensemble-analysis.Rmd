@@ -20,5 +20,438 @@ A final consideration here is that certain models may be better at predicting ce
 
 
 First, import packages, scoring functions, and challenge data. 
-```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(reticulate)
+# library(reactable)
+use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+synapse <- import('synapseclient')
+syn <- synapse$Synapse()
+
 ```
+
+```{r include=FALSE}
+#login
+syn$login('ra2dreamservice', '')
+
+```
+
+Scoring helper functions.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# 
+calculate_weight <- function(x){
+  weight <- dplyr::if_else(x == 0, 1,
+            dplyr::if_else(x == 1, 2,
+            dplyr::if_else(x>=2 & x<=3, 2.143547,
+            dplyr::if_else(x>=4 & x<=7, 3.863745,
+            dplyr::if_else(x>=8 & x<=20, 8,
+            dplyr::if_else(x>=21 & x<=55, 16,
+            dplyr::if_else(x>=56 & x<=148, 32,
+            dplyr::if_else(x>=148, 64, 0))))))))
+  return(weight)
+}
+
+# 
+sum_weighted_error <- function(gold, pred, weight){
+  sum(weight*abs(gold - pred))
+}
+
+# 
+rmse <- function(gold, pred){
+  sqrt(mean((gold - pred) ** 2))
+}
+
+# Scoring function for joint weighted sum RMSE.
+score_weighted_rmse <- function(df, pred) {
+  df$pred_score <- pred
+  df %>% group_by(Patient_ID, weight) %>%
+    summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+    ungroup() %>% 
+    summarize(result= sum(weight*patient_rmse)/sum(weight)) %>%
+    pluck("result")
+}
+```
+
+#### Goldstandard
+
+The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+gold <- read.csv(syn$get("syn22296988")$path) %>%
+  mutate(weight = calculate_weight(Overall_Tol))
+
+gold.sc1 <- gold %>% 
+  select(Patient_ID, Overall_Tol, weight)
+
+gold_joints <- gold %>%
+  select(-Overall_Tol) %>%
+  gather('joint', 'score', -Patient_ID, -weight)
+```
+
+---
+
+## Bootstrap Submissions
+
+Read in prediction files, combine, then bootstrap the predictions + a gold standard 1000 times to calculate 1000 scores per prediction. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+N <- 1000  # number of bootstrapped scores to be calculated
+
+query <- syn$tableQuery(
+  "SELECT id, prediction_fileid, submitterid, createdOn,
+    sc1_weighted_sum_error AS sc1, 
+    sc2_joint_weighted_sum_rmse AS sc2, 
+    sc3_joint_weighted_sum_rmse AS sc3
+  FROM syn22236264 WHERE status = 'ACCEPTED' AND 
+    submitterid <> 3408914")$asDataFrame() %>%
+  group_by(submitterid) %>%
+  slice(which.max(createdOn)) %>%
+  select(-createdOn)
+
+# For easier identification, replace each team/participant's submitterid with
+# their team name/username.
+query$submitterid <- as.character(query$submitterid)
+team_names <- sapply(query$submitterid, function(sub) {
+  name <- tryCatch({
+    syn$getUserProfile(sub)$userName
+  }, error = function(err) {
+    syn$getTeam(sub)$name
+  })
+  return(name)
+})
+query$submitterid <- team_names
+
+pred_filenames <- lapply(query$prediction_fileid, function(id) {
+  syn$get(id)$path
+})
+names(pred_filenames) <- team_names
+
+# Before bootstrapping, rearrange the teams by rank, where left = better 
+# performance and right = not-as-great performance.
+
+### SC1
+submissions.sc1 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    mutate_at(vars(-Patient_ID), ~ replace(., which(.<0), 0)) %>%
+    select(Patient_ID, Overall_Tol) %>%
+    rename(!!team := Overall_Tol)
+}) %>%
+  reduce(left_join, by="Patient_ID") %>%
+  left_join(gold.sc1, by="Patient_ID") %>%
+  rename(gold = Overall_Tol)
+
+results.sc1 <- submissions.sc1[,c("gold", "weight", (query %>% arrange(sc1))$submitterid)]
+
+ensemble.sc1 <- sapply(3:ncol(results.sc1), function(x){
+  new_col <- results.sc1 %>% 
+    select(3:x) %>% 
+    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
+    pluck(as.character(x))
+}) %>% 
+  as.data.frame()
+
+ens_names <- glue::glue("{1:ncol(ensemble.sc1)}_sc1_ensemble")
+colnames(ensemble.sc1) <- ens_names
+
+ensemble.sc1 <- ensemble.sc1 %>% 
+  add_column(weight = results.sc1$weight) %>% 
+  add_column(gold = results.sc1$gold)
+
+ensemble.sc1 <- ensemble.sc1[,c("gold", "weight", ens_names)]
+
+p<-lapply(ens_names, function(x){
+  cor <- cor(ensemble.sc1$gold, ensemble.sc1[[x]], method = 'spearman')
+  ggplot(data = ensemble.sc1) +
+    geom_point(aes(x = gold, y = !!sym(x))) +
+    ggtitle(glue::glue("spearman = {cor}"))
+})
+
+bs_indices.sc1 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc1), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc1 <- apply(bs_indices.sc1, 2, function(ind) {
+  tmp.gold <- ensemble.sc1[ind,c(1:2)]
+  apply(ensemble.sc1[ind, -c(1:2)], 2, function(pred) {
+    sum_weighted_error(
+      log2(tmp.gold$gold + 1),
+      log2(pred + 1),
+      tmp.gold$weight
+    ) / sum(tmp.gold$weight)
+  })
+}) %>%
+  t()
+
+
+
+
+### SC2
+submissions.sc2 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    select(-Overall_Tol) %>%
+    gather('joint', !!team, -Patient_ID)
+}) %>%
+  reduce(left_join, by=c("Patient_ID", "joint")) %>%
+  left_join(gold_joints, by=c("Patient_ID", "joint"))
+
+results.sc2 <- submissions.sc2[, c(
+    "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc2))$submitterid
+  )] %>%
+  filter(grepl(".+_J__.+", joint))
+
+ensemble.sc2 <- sapply(5:ncol(results.sc2), function(x){
+  new_col <- results.sc2 %>% 
+    select(5:x) %>% 
+    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
+    pluck(as.character(x))
+}) %>% 
+  as.data.frame()
+
+ens_names <- glue::glue("{1:ncol(ensemble.sc2)}_sc2_ensemble")
+colnames(ensemble.sc2) <- ens_names
+
+ensemble.sc2 <- ensemble.sc2 %>% 
+  add_column(weight = results.sc2$weight,
+             score = results.sc2$score,
+             Patient_ID = results.sc2$Patient_ID,
+             joint = results.sc2$joint)
+
+ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_names)]
+
+p<-lapply(ens_names, function(x){
+  cor <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
+  ggplot(data = ensemble.sc2) +
+    geom_point(aes(x = gold, y = !!sym(x))) +
+    ggtitle(glue::glue("spearman = {cor}"))
+})
+
+p
+
+bs_indices.sc2 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc2), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
+  tmp.gold <- ensemble.sc2[ind, c(1:4)]
+  apply(ensemble.sc2[ind, -c(1:4)], 2, function(pred) {
+    score_weighted_rmse(tmp.gold, pred)
+  })
+}) %>%
+  t()
+
+### SC3
+results.sc3 <- submissions.sc23[, c(
+    "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc3))$submitterid
+  )] %>%
+  filter(grepl(".+_E__.+", joint))
+
+bs_indices.sc3 <- matrix(1:nrow(results.sc3), nrow(results.sc3), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
+  tmp.gold <- results.sc3[ind, c(1:4)]
+  apply(results.sc3[ind, -c(1:4)], 2, function(pred) {
+    score_weighted_rmse(tmp.gold, pred)
+  })
+}) %>%
+  t()
+```
+
+---
+
+## Bayes Factor Analysis
+
+Use our `challengescoring` package to compute Bayes factors using a matrix of scores, setting the `refPredIndex` as the number of the column that contains the top prediction (the reference prediction).
+
+In addition to computing BF against the top performer, we are also interested in comparing against all columns. Some tweaking to the computation will be required, as the reference index may no longer be the best, which in consequence, means the inversion of K will be dependent on which submission it is being compared with.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(challengescoring)
+computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
+                               refPredIndex,
+                               invertBayes){
+
+    M <- as.data.frame(bootstrapMetricMatrix - bootstrapMetricMatrix[,refPredIndex])
+    K <- apply(M ,2, function(x) {
+      k <- sum(x >= 0)/sum(x < 0)
+      if(sum(x >= 0) > sum(x < 0)){
+      return(k)
+      }else{
+      return(1/k)
+      }
+    })
+    if(invertBayes == T){K <- 1/K}
+    K[refPredIndex] <- 0
+
+    return(K)
+}
+
+# Top performer: Team Shirin
+bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+# Top performer: Hongyang Li and Yuanfang Guan (column 1)
+bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+# Top performer: Gold Therapy (column 1)
+bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value) 
+
+
+# bayesFactorMatrix <- function(bootstrapMatrix) {
+#   names <- colnames(bootstrapMatrix)
+#   results <- purrr::map(1:ncol(bootstrapMatrix), function(ind) {
+#     computeBayesFactorWhereRefIsNotBest(bootstrapMatrix, refPredIndex=ind, invertBayes=F) %>%
+#       as.data.frame()
+# }) %>% bind_cols
+#   colnames(results) <- names
+#   results
+# }
+```
+
+### Subchallenge 1
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc1
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc2
+bayesFactorMatrix(boot.sc2)
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc3
+bayesFactorMatrix(boot.sc3)
+```
+
+
+---
+
+## Plot Results
+
+Plot boxplot of all scores, coloring the boxes by Bayes factor. 
+
+```{r echo=TRUE, message=FALSE}
+plot_results <- function(results, bayes, subchallenge) {
+  res <- results %>%
+    as_tibble() %>%
+    gather(submission, bs_score) %>%
+    left_join(bayes) %>%
+    mutate(bayes_category=case_when(
+      bayes == 0 ~ "Reference",
+      bayes<=3 ~ "<3",
+      bayes>=3 & bayes <5 ~ "3-5",
+      bayes>=5 & bayes <10 ~ "5-10",
+      bayes>=10 ~ ">10")) 
+  
+  lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
+  res$submission <- factor(res$submission, levels = lvls)
+  
+  ggplot(res, aes(
+      x=submission,
+      y=bs_score,
+      color=bayes_category
+    )) +
+    geom_boxplot() +
+    theme_bw() +
+    scale_color_manual(values = c(
+      "Reference"="#d32e36", 
+      '<3' = '#cf4d6f', 
+      "3-5" = "#cc7e85",
+      "5-10" = '#c5afa4', 
+      ">10" = "#a8a6a4"),
+      name = "Bayes Factor") +
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
+}
+```
+
+### Subchallenge 1
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc1, bayes_top.sc1, "SC1")
+```
+
+### Subchallenge 2
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc2, bayes_top.sc2, "SC2")
+```
+
+### Subchallenge 3
+
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc3, bayes_top.sc3, "SC3")
+plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
+```
+
+
+## Pairwise T-test
+
+Additionally, test the significance by performing a pairwise t-test across all predictions, then plot.
+
+```{r echo=FALSE}
+pairwise_ttest <- function(boot) {
+  apply(boot, 2, function(col_x) { 
+      apply(boot, 2, function(col_y) { 
+          t.test(col_x, col_y, paired=T)$p.value
+      })
+  }) %>% as_tibble(rownames = "team_a") %>% 
+  mutate_all(~replace(., is.nan(.), 1)) %>%
+  gather(team_b, pval, -team_a) %>% 
+  mutate(fdr = signif(p.adjust(pval, "fdr"),3)) 
+}
+
+sc1.pvals <- pairwise_ttest(boot.sc1)
+sc2.pvals <- pairwise_ttest(boot.sc2)
+sc3.pvals <- pairwise_ttest(boot.sc3)
+```
+
+### Subchallenge 1
+
+```{r echo=FALSE}
+sc1.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc1.pvals
+reactable(sc1.pvals, sortable=TRUE)
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE}
+sc2.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc2.pvals
+reactable(sc2.pvals, sortable=TRUE)
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE}
+sc3.pvals %>% 
+  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+sc3.pvals
+reactable(sc3.pvals, sortable=TRUE)
+```
+
+
+
+
+
