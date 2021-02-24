@@ -25,7 +25,7 @@ First, import packages, scoring functions, and challenge data.
 library(tidyverse)
 library(reticulate)
 # library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+# use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
 synapse <- import('synapseclient')
 syn <- synapse$Synapse()
 
@@ -220,15 +220,15 @@ ensemble.sc2 <- ensemble.sc2 %>%
 ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
-  cor <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc2) +
-    geom_point(aes(x = gold, y = !!sym(x))) +
-    ggtitle(glue::glue("spearman = {cor}"))
+    geom_boxplot(aes(x = as_factor(score), y = !!sym(x))) +
+    ylim(0,5)
 })
 
 p
 
-bs_indices.sc2 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc2), N) %>%
+
+bs_indices.sc2 <- matrix(1:nrow(ensemble.sc2), nrow(ensemble.sc2), N) %>%
   apply(2, sample, replace = T)
 
 boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
@@ -240,17 +240,53 @@ boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
   t()
 
 ### SC3
-results.sc3 <- submissions.sc23[, c(
+submissions.sc3 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    select(-Overall_Tol) %>%
+    gather('joint', !!team, -Patient_ID)
+}) %>%
+  reduce(left_join, by=c("Patient_ID", "joint")) %>%
+  left_join(gold_joints, by=c("Patient_ID", "joint"))
+
+results.sc3 <- submissions.sc3[, c(
     "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc3))$submitterid
   )] %>%
   filter(grepl(".+_E__.+", joint))
 
-bs_indices.sc3 <- matrix(1:nrow(results.sc3), nrow(results.sc3), N) %>%
+ensemble.sc3 <- sapply(5:ncol(results.sc3), function(x){
+  new_col <- results.sc3 %>% 
+    select(5:x) %>% 
+    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
+    pluck(as.character(x))
+}) %>% 
+  as.data.frame()
+
+ens_names <- glue::glue("{1:ncol(ensemble.sc3)}_sc3_ensemble")
+colnames(ensemble.sc3) <- ens_names
+
+ensemble.sc3 <- ensemble.sc3 %>% 
+  add_column(weight = results.sc3$weight,
+             score = results.sc3$score,
+             Patient_ID = results.sc3$Patient_ID,
+             joint = results.sc3$joint)
+
+ensemble.sc3 <- ensemble.sc3[,c("Patient_ID", "joint", "weight", "score", ens_names)]
+
+p<-lapply(ens_names, function(x){
+  ggplot(data = ensemble.sc3) +
+    geom_boxplot(aes(x = as_factor(score), y = !!sym(x))) +
+    ylim(0,10)
+})
+
+p
+
+
+bs_indices.sc3 <- matrix(1:nrow(ensemble.sc3), nrow(ensemble.sc3), N) %>%
   apply(2, sample, replace = T)
 
 boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
-  tmp.gold <- results.sc3[ind, c(1:4)]
-  apply(results.sc3[ind, -c(1:4)], 2, function(pred) {
+  tmp.gold <- ensemble.sc3[ind, c(1:4)]
+  apply(ensemble.sc3[ind, -c(1:4)], 2, function(pred) {
     score_weighted_rmse(tmp.gold, pred)
   })
 }) %>%
@@ -292,12 +328,12 @@ bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, i
   rename(bayes = value)
 
 # Top performer: Hongyang Li and Yuanfang Guan (column 1)
-bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
+bayes_top.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value)
 
 # Top performer: Gold Therapy (column 1)
-bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
+bayes_top.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value) 
 
@@ -323,14 +359,12 @@ bayes_top.sc1
 
 ```{r echo=FALSE, message=FALSE}
 bayes_top.sc2
-bayesFactorMatrix(boot.sc2)
 ```
 
 ### Subchallenge 3
 
 ```{r echo=FALSE, message=FALSE}
 bayes_top.sc3
-bayesFactorMatrix(boot.sc3)
 ```
 
 
@@ -342,16 +376,23 @@ Plot boxplot of all scores, coloring the boxes by Bayes factor.
 
 ```{r echo=TRUE, message=FALSE}
 plot_results <- function(results, bayes, subchallenge) {
+  first_score <- mean(results[,1])
+  
   res <- results %>%
     as_tibble() %>%
     gather(submission, bs_score) %>%
     left_join(bayes) %>%
+    group_by(submission) %>% 
+    mutate(mean_score = mean(bs_score)) %>% 
+    ungroup() %>% 
     mutate(bayes_category=case_when(
       bayes == 0 ~ "Reference",
-      bayes<=3 ~ "<3",
-      bayes>=3 & bayes <5 ~ "3-5",
-      bayes>=5 & bayes <10 ~ "5-10",
-      bayes>=10 ~ ">10")) 
+      mean_score < first_score & bayes<=3 ~ "<3, better",
+      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
+      mean_score < first_score & bayes>=10 ~ ">10, better",
+      mean_score > first_score & bayes<=3 ~ "<3, worse",
+      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
+      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
   
   lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
   res$submission <- factor(res$submission, levels = lvls)
@@ -364,13 +405,58 @@ plot_results <- function(results, bayes, subchallenge) {
     geom_boxplot() +
     theme_bw() +
     scale_color_manual(values = c(
-      "Reference"="#d32e36", 
-      '<3' = '#cf4d6f', 
-      "3-5" = "#cc7e85",
-      "5-10" = '#c5afa4', 
-      ">10" = "#a8a6a4"),
+      "Reference"="#000000", 
+      '<3, better' = '#AA3F0E', 
+      "3-10, better" = '#E15514', 
+      ">10, better" = "#EF7B45",
+      '<3, worse' = '#024DB6', 
+      "3-10, worse" = '#035EDD', 
+      ">10, worse" = "#3689FC"),
       name = "Bayes Factor") +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+}
+
+plot_results_path <- function(results, bayes, subchallenge) {
+   first_score <- mean(results[,1])
+  
+  res <- results %>%
+    as_tibble() %>%
+    gather(submission, bs_score) %>%
+    left_join(bayes) %>%
+    group_by(submission) %>% 
+    mutate(mean_score = mean(bs_score)) %>% 
+    ungroup() %>% 
+    mutate(bayes_category=case_when(
+      bayes == 0 ~ "Reference",
+      mean_score < first_score & bayes<=3 ~ "<3, better",
+      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
+      mean_score < first_score & bayes>=10 ~ ">10, better",
+      mean_score > first_score & bayes<=3 ~ "<3, worse",
+      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
+      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
+  
+  lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
+  res$submission <- factor(res$submission, levels = lvls)
+  
+  ggplot(res, aes(
+      x=submission,
+      y=mean_score
+    )) +
+    geom_line(aes(group = 1)) +
+        geom_point(aes(color = bayes_category)) +
+    theme_bw() +
+    scale_color_manual(values = c(
+      "Reference"="#000000", 
+      '<3, better' = '#AA3F0E', 
+      "3-10, better" = '#E15514', 
+      ">10, better" = "#EF7B45",
+      '<3, worse' = '#024DB6', 
+      "3-10, worse" = '#035EDD', 
+      ">10, worse" = "#3689FC"),
+      name = "Bayes Factor") +
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 }
 ```
 
@@ -378,80 +464,20 @@ plot_results <- function(results, bayes, subchallenge) {
 
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
+plot_results_path(boot.sc1, bayes_top.sc1, "SC1")
 ```
 
 ### Subchallenge 2
 
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc2, bayes_top.sc2, "SC2")
+plot_results_path(boot.sc2, bayes_top.sc2, "SC2")
 ```
 
 ### Subchallenge 3
 
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc3, bayes_top.sc3, "SC3")
-plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
+plot_results_path(boot.sc3, bayes_top.sc3, "SC3")
 ```
-
-
-## Pairwise T-test
-
-Additionally, test the significance by performing a pairwise t-test across all predictions, then plot.
-
-```{r echo=FALSE}
-pairwise_ttest <- function(boot) {
-  apply(boot, 2, function(col_x) { 
-      apply(boot, 2, function(col_y) { 
-          t.test(col_x, col_y, paired=T)$p.value
-      })
-  }) %>% as_tibble(rownames = "team_a") %>% 
-  mutate_all(~replace(., is.nan(.), 1)) %>%
-  gather(team_b, pval, -team_a) %>% 
-  mutate(fdr = signif(p.adjust(pval, "fdr"),3)) 
-}
-
-sc1.pvals <- pairwise_ttest(boot.sc1)
-sc2.pvals <- pairwise_ttest(boot.sc2)
-sc3.pvals <- pairwise_ttest(boot.sc3)
-```
-
-### Subchallenge 1
-
-```{r echo=FALSE}
-sc1.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc1.pvals
-reactable(sc1.pvals, sortable=TRUE)
-```
-
-### Subchallenge 2
-
-```{r echo=FALSE}
-sc2.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc2.pvals
-reactable(sc2.pvals, sortable=TRUE)
-```
-
-### Subchallenge 3
-
-```{r echo=FALSE}
-sc3.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc3.pvals
-reactable(sc3.pvals, sortable=TRUE)
-```
-
-
-
-
 
