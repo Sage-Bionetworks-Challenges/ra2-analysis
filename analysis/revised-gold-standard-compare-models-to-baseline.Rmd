@@ -29,7 +29,7 @@ library(ggplot2)
 use_condaenv("synapse")
 synapseclient <- reticulate::import('synapseclient')
 syn <- synapseclient$Synapse()
-syn$login()
+syn$login('ra2dreamservice', 'Xe&2S6x1&d&h')
 ```
 
 #### Functions 
@@ -255,7 +255,8 @@ bayes_baseline.sc3
 
 Plot boxplot of all scores, coloring the boxes by Bayes factor. 
 
-```{r echo=TRUE, message=FALSE}
+```{r echo=TRUE, message=FALSE, fig.height=8, fig.width=4}
+
 plot_results <- function(results, bayes, subchallenge) {
   results %>%
     as_tibble() %>%
@@ -285,7 +286,17 @@ plot_results <- function(results, bayes, subchallenge) {
     labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
 }
 
-plot_results(boot.sc1, bayes_baseline.sc1, "SC1")
-plot_results(boot.sc2, bayes_baseline.sc2, "SC2")
-plot_results(boot.sc3, bayes_baseline.sc3, "SC3")
+sc1 <- plot_results(boot.sc1, bayes_baseline.sc1, "SC1")
+sc2 <- plot_results(boot.sc2, bayes_baseline.sc2, "SC2")
+sc3 <- plot_results(boot.sc3, bayes_baseline.sc3, "SC3")
+
+cowplot::plot_grid(sc1, 
+                   sc2, 
+                   sc3, 
+                   ncol = 1, labels = c("A", "B", "C"))
+
+ggsave("supplemental_figure_comparison_to_baseline.png")
+ggsave("supplemental_figure_comparison_to_baseline.svg")
+ggsave("supplemental_figure_comparison_to_baseline.pdf")
+
 ```

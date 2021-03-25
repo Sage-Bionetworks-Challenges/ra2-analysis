@@ -1,13 +1,18 @@
 ---
-title: "Bootstrap analysis: Determine top performers"
+title: 'Bootstrap analysis: Determine top performers'
 author: "Verena Chung, Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
+  html_document:
+    toc: yes
+    df_print: paged
   html_notebook:
     df_print: paged
     code_fold: hide
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
 ---
 
 ## Introduction 
@@ -28,10 +33,15 @@ library(ggplot2)
 library(reactable)
 
 # Synapse setup to use `reticulate`
-use_condaenv("synapse")
+use_condaenv("synapse-2")
 synapseclient <- reticulate::import('synapseclient')
 syn <- synapseclient$Synapse()
-syn$login()
+```
+
+```{r include=FALSE}
+#login
+syn$login('ra2dreamservice', "Xe&2S6x1&d&h")
+
 ```
 
 #### Functions 
@@ -317,21 +327,185 @@ plot_results <- function(results, bayes, subchallenge) {
 ### Subchallenge 1
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc1, bayes_top.sc1, "SC1")
+sc1 <- plot_results(boot.sc1, bayes_top.sc1, "SC1")
+sc1
 plot_results(boot.sc1[,1:6], bayes_top.sc1, "SC1")
+
 ```
 
 ### Subchallenge 2
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc2, bayes_top.sc2, "SC2")
+sc2 <- plot_results(boot.sc2, bayes_top.sc2, "SC2")
+sc2
 ```
 
 ### Subchallenge 3
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc3, bayes_top.sc3, "SC3")
+sc3 <- plot_results(boot.sc3, bayes_top.sc3, "SC3")
+sc3
 plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
+```
+
+## Recalculate Bayes against Baseline model
+
+The Bayes factor calculation for the analysis against the baseline model is a little bit more complicated because the reference is in the middle.  This consequently means that the inversion of K (BF) will be dependent on which submission is being compared to the baseline.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
+                               refPredIndex,
+                               invertBayes){
+
+    M <- as.data.frame(bootstrapMetricMatrix - bootstrapMetricMatrix[,refPredIndex])
+    K <- apply(M ,2, function(x) {
+      k <- sum(x >= 0)/sum(x < 0)
+      if(sum(x >= 0) > sum(x < 0)){
+      return(k)
+      }else{
+      return(1/k)
+      }
+    })
+    if(invertBayes == T){K <- 1/K}
+    K[refPredIndex] <- 0
+
+    return(K)
+}
+
+# Baseline: RA2 Baseline Model (columns 15, 12 and 10)
+bayes_baseline.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=15, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes_baseline = value)
+
+bayes_baseline.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=12, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes_baseline = value)
+
+bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=10, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes_baseline = value)
+
+
+```
+
+
+###Make results figure for paper
+Tentatively Figure 3. 
+
+```{r}
+
+plot_results_figure <- function(results, bayes, bayes_2, subchallenge) {
+  foo <-results %>%
+    as_tibble() %>%
+    gather(submission, bs_score) %>%
+    left_join(bayes) %>%
+    left_join(bayes_2) %>% 
+    mutate(bayes = case_when(bayes == Inf ~ 99999,
+                     bayes != Inf ~ bayes)) %>% 
+    mutate(bayes_baseline = case_when(bayes_baseline == Inf ~ 99999,
+                     bayes_baseline != Inf ~ bayes_baseline)) %>% 
+    mutate(bayes_category=case_when(
+      bayes == 0 ~ "Reference",
+      bayes<3 ~ "<3",
+      bayes>=3 & bayes <=20 ~ "3-20",
+      bayes>20 & submission != "RA2 Baseline Model" ~ ">20",
+      bayes>20 & submission == "RA2 Baseline Model" ~ "Baseline Model")) %>% 
+    mutate(submission = fct_reorder(submission, -bs_score, .fun = mean))
+
+   a <-  ggplot(foo, aes(
+      x=submission,
+      y=bs_score,
+      color=bayes_category
+    )) +
+    geom_boxplot() +
+    theme_bw() +
+    scale_color_manual(values = c(
+      "Reference"="#FB3640", 
+      '<3' = '#1F487E', 
+      "3-20" = '#53B3CB', 
+      ">20" = "#1D3461",
+      "Baseline Model" = '#FFD447'),
+      name = "Bayes Factor") +
+    theme(legend.position = "none")+
+    coord_flip() +
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
+    
+  b<- ggplot(foo %>% select(-bs_score) %>% distinct, aes(
+      x=submission,
+      y=bayes,
+      fill=bayes_category
+    )) +
+    geom_bar(stat = 'identity') +
+    theme_bw() +
+    geom_hline(aes(yintercept=3),linetype = "dashed") +
+    scale_fill_manual(values = c(
+      "Reference"="#FB3640", 
+      '<3' = '#1F487E', 
+      "3-20" = '#53B3CB', 
+      ">20" = "#1D3461",
+      "Baseline Model" = '#FFD447'),
+      name = "Bayes Factor") +
+    theme(axis.text.y=element_blank(), legend.position = "none", axis.ticks.y = element_blank())+
+    coord_flip(ylim = c(0,20)) +
+    labs(x="", y=paste("Bayes (vs top)")) +
+    scale_y_continuous(breaks = c(0, 3, 5, 10, 20),
+                   labels = c(0, 3, 5, 10, 20))
+    
+   
+   c<- ggplot(foo %>% select(-bs_score) %>% distinct, aes(
+      x=submission,
+      y=bayes_baseline,
+      fill=bayes_category
+    )) +
+    geom_bar(stat = 'identity') +
+    theme_bw() +
+    geom_hline(aes(yintercept=3),linetype = "dashed") +
+    scale_fill_manual(values = c(
+      "Reference"="#FB3640", 
+      '<3' = '#1F487E', 
+      "3-20" = '#53B3CB', 
+      ">20" = "#1D3461",
+      "Baseline Model" = '#FFD447'),
+      name = "Bayes Factor (vs top)") +
+    theme(axis.text.y=element_blank(),axis.ticks.y = element_blank()) +
+    coord_flip(ylim = c(0,20)) +
+    labs(x="",y=paste("Bayes (vs baseline)")) +
+    scale_y_continuous(breaks = c(0, 3, 5, 10, 20),
+                   labels = c(0, 3, 5, 10, 20))
+   
+  legend <- cowplot::get_legend(
+  # create some space to the left of the legend
+  c + theme(legend.box.margin = margin(0, 0, 0, 12))
+  )
+  
+   cowplot::plot_grid(a,b,c+theme(legend.position="none"),legend, nrow = 1, rel_widths = c(3,1,1,1))
+    
+}
+
+
+plt <- plot_results_figure(boot.sc1, bayes_top.sc1, bayes_baseline.sc1, "SC1")
+plt2 <- plot_results_figure(boot.sc2, bayes_top.sc2, bayes_baseline.sc2, "SC2")
+plt3 <- plot_results_figure(boot.sc3, bayes_top.sc3, bayes_baseline.sc3, "SC3")
+
+cowplot::plot_grid(plt, plt2, plt3, nrow = 3, labels = "AUTO")
+
+ggsave("../figures/Figure3.pdf", height = 12, width = 10, scale = 1)
+
+```
+
+
+### Manuscript figure content
+
+```{r fig.height=8, fig.width=4}
+cowplot::plot_grid(sc1, 
+                   sc2, 
+                   sc3, 
+                   ncol = 1, labels = "AUTO")
+
+ggsave("figure_3_bootstrapping.svg")
+ggsave("figure_3_bootstrapping.pdf")
+ggsave("figure_3_bootstrapping.png")
+
 ```
 
 
@@ -359,10 +533,14 @@ sc3.pvals <- pairwise_ttest(boot.sc3)
 ### Subchallenge 1
 
 ```{r echo=FALSE}
-sc1.pvals %>% 
+sc1_pval_plot<-sc1.pvals %>% 
   ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
   geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = 'Team', y = 'Team') + 
+  scale_fill_gradient2("FDR adjusted p-value") 
+
+sc1_pval_plot
 
 sc1.pvals
 reactable(sc1.pvals, sortable=TRUE)
@@ -371,10 +549,14 @@ reactable(sc1.pvals, sortable=TRUE)
 ### Subchallenge 2
 
 ```{r echo=FALSE}
-sc2.pvals %>% 
+sc2_pval_plot <- sc2.pvals %>% 
   ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
   geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = 'Team', y = 'Team') + 
+   scale_fill_gradient2("FDR adjusted p-value")
+
+sc2_pval_plot
 
 sc2.pvals
 reactable(sc2.pvals, sortable=TRUE)
@@ -383,11 +565,38 @@ reactable(sc2.pvals, sortable=TRUE)
 ### Subchallenge 3
 
 ```{r echo=FALSE}
-sc3.pvals %>% 
+sc3_pval_plot <- sc3.pvals %>% 
   ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
   geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = 'Team', y = 'Team') + 
+   scale_fill_gradient2("FDR adjusted p-value")
+
+sc3_pval_plot
 
 sc3.pvals
 reactable(sc3.pvals, sortable=TRUE)
 ```
+
+### Supplemental Figure 
+```{r fig.width=10, fig.height=3}
+legend <- cowplot::get_legend(
+  # create some space to the left of the legend
+  sc1_pval_plot + theme(legend.box.margin = margin(0, 0, 0, 12))
+)
+
+plt <- cowplot::plot_grid(sc1_pval_plot + theme(legend.position="none"),
+                   sc2_pval_plot + theme(legend.position="none"),
+                   sc3_pval_plot + theme(legend.position="none"),
+                   nrow = 1, 
+                   labels = "AUTO")
+
+plt_2 <- cowplot::plot_grid(plt, legend, nrow = 1, rel_widths = c(3,0.5))
+plt_2
+
+ggsave('supplemental_figure_final_submission_pairwise_p_values.pdf')
+ggsave('supplemental_figure_final_submission_pairwise_p_values.png')
+
+```
+
+
