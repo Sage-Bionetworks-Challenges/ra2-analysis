@@ -1,14 +1,20 @@
 ---
-title: "Ensemble model analysis"
-author: "a name like Dorothy Vaughan"
+title: 'Final round ensembled model scoring'
+author: "Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
   html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
     df_print: paged
     code_fold: hide
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
 ---
+
 
 ## Introduction
 
@@ -33,7 +39,7 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', '')
+syn$login('ra2dreamservice', "***REMOVED***")
 
 ```
 
@@ -145,14 +151,14 @@ submissions.sc1 <- lapply(names(pred_filenames), function(team) {
 results.sc1 <- submissions.sc1[,c("gold", "weight", (query %>% arrange(sc1))$submitterid)]
 
 ensemble.sc1 <- sapply(3:ncol(results.sc1), function(x){
+  print(colnames(results.sc1)[3:x])
   new_col <- results.sc1 %>% 
     select(3:x) %>% 
-    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
-    pluck(as.character(x))
+    rowMeans()
 }) %>% 
   as.data.frame()
 
-ens_names <- glue::glue("{1:ncol(ensemble.sc1)}_sc1_ensemble")
+ens_names <- c(glue::glue("{colnames(results.sc1)[3]}"), glue::glue("+{colnames(results.sc1)[-1:-3]}"))
 colnames(ensemble.sc1) <- ens_names
 
 ensemble.sc1 <- ensemble.sc1 %>% 
@@ -208,7 +214,7 @@ ensemble.sc2 <- sapply(5:ncol(results.sc2), function(x){
 }) %>% 
   as.data.frame()
 
-ens_names <- glue::glue("{1:ncol(ensemble.sc2)}_sc2_ensemble")
+ens_names <- c(glue::glue("{colnames(results.sc2)[5]}"), glue::glue("+{colnames(results.sc2)[-1:-5]}"))
 colnames(ensemble.sc2) <- ens_names
 
 ensemble.sc2 <- ensemble.sc2 %>% 
@@ -222,13 +228,13 @@ ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_na
 p<-lapply(ens_names, function(x){
   cor <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc2) +
-    geom_point(aes(x = gold, y = !!sym(x))) +
+    geom_point(aes(x = score, y = !!sym(x))) +
     ggtitle(glue::glue("spearman = {cor}"))
 })
 
 p
 
-bs_indices.sc2 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc2), N) %>%
+bs_indices.sc2 <- matrix(1:nrow(ensemble.sc2), nrow(ensemble.sc2), N) %>%
   apply(2, sample, replace = T)
 
 boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
@@ -240,17 +246,53 @@ boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
   t()
 
 ### SC3
-results.sc3 <- submissions.sc23[, c(
+submissions.sc3 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    select(-Overall_Tol) %>%
+    gather('joint', !!team, -Patient_ID)
+}) %>%
+  reduce(left_join, by=c("Patient_ID", "joint")) %>%
+  left_join(gold_joints, by=c("Patient_ID", "joint"))
+
+results.sc3 <- submissions.sc3[, c(
     "Patient_ID", "joint", "weight", "score", (query %>% arrange(sc3))$submitterid
   )] %>%
   filter(grepl(".+_E__.+", joint))
 
-bs_indices.sc3 <- matrix(1:nrow(results.sc3), nrow(results.sc3), N) %>%
+ensemble.sc3 <- sapply(5:ncol(results.sc3), function(x){
+  new_col <- results.sc3 %>% 
+    select(5:x) %>% 
+    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
+    pluck(as.character(x))
+}) %>% 
+  as.data.frame()
+
+ens_names <- c(glue::glue("{colnames(results.sc3)[5]}"), glue::glue("+{colnames(results.sc3)[-1:-5]}"))
+colnames(ensemble.sc3) <- ens_names
+
+ensemble.sc3 <- ensemble.sc3 %>% 
+  add_column(weight = results.sc3$weight,
+             score = results.sc3$score,
+             Patient_ID = results.sc3$Patient_ID,
+             joint = results.sc3$joint)
+
+ensemble.sc3 <- ensemble.sc3[,c("Patient_ID", "joint", "weight", "score", ens_names)]
+
+p<-lapply(ens_names, function(x){
+  cor <- cor(ensemble.sc3$score, ensemble.sc3[[x]], method = 'spearman') 
+  ggplot(data = ensemble.sc3) +
+    geom_point(aes(x = score, y = !!sym(x))) +
+    ggtitle(glue::glue("spearman = {cor}"))
+})
+
+p
+
+bs_indices.sc3 <- matrix(1:nrow(ensemble.sc3), nrow(ensemble.sc3), N) %>%
   apply(2, sample, replace = T)
 
 boot.sc3 <- apply(bs_indices.sc3, 2, function(ind) {
-  tmp.gold <- results.sc3[ind, c(1:4)]
-  apply(results.sc3[ind, -c(1:4)], 2, function(pred) {
+  tmp.gold <- ensemble.sc3[ind, c(1:4)]
+  apply(ensemble.sc3[ind, -c(1:4)], 2, function(pred) {
     score_weighted_rmse(tmp.gold, pred)
   })
 }) %>%
@@ -292,12 +334,12 @@ bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, i
   rename(bayes = value)
 
 # Top performer: Hongyang Li and Yuanfang Guan (column 1)
-bayes_top.sc2 <- computeBayesFactor(boot.sc2, refPredIndex=1, invertBayes=F) %>%
+bayes_top.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value)
 
 # Top performer: Gold Therapy (column 1)
-bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
+bayes_top.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=1, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes = value) 
 
@@ -312,27 +354,6 @@ bayes_top.sc3 <- computeBayesFactor(boot.sc3, refPredIndex=1, invertBayes=F) %>%
 #   results
 # }
 ```
-
-### Subchallenge 1
-
-```{r echo=FALSE, message=FALSE}
-bayes_top.sc1
-```
-
-### Subchallenge 2
-
-```{r echo=FALSE, message=FALSE}
-bayes_top.sc2
-bayesFactorMatrix(boot.sc2)
-```
-
-### Subchallenge 3
-
-```{r echo=FALSE, message=FALSE}
-bayes_top.sc3
-bayesFactorMatrix(boot.sc3)
-```
-
 
 ---
 
@@ -353,8 +374,10 @@ plot_results <- function(results, bayes, subchallenge) {
       bayes>=5 & bayes <10 ~ "5-10",
       bayes>=10 ~ ">10")) 
   
-  lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
+  lvls <- colnames(results)
   res$submission <- factor(res$submission, levels = lvls)
+  
+  labs <- glue::glue("{res$submission}+")
   
   ggplot(res, aes(
       x=submission,
@@ -370,17 +393,58 @@ plot_results <- function(results, bayes, subchallenge) {
       "5-10" = '#c5afa4', 
       ">10" = "#a8a6a4"),
       name = "Bayes Factor") +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score"))
-}
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  }
 ```
 
 ### Subchallenge 1
 
+SC1 ensemble results are a little odd. Adding in RYM has a pretty substantial effect on the mean ensemble. 
+
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
+
+
 ```
 
+If we look at the raw predictions in a beeswarm plot, we see that RYM's predictions seem (on average) to be more conservative than the people that perform better (ie less likely to predict 0s or large values).  It's possible that this is causing the effect that we see in the ensemble. 
+
+```{r echo=TRUE, message=FALSE}
+
+original_sc1_plot_data <-results.sc1 %>% 
+  pivot_longer(names_to = "model", values_to = "prediction", cols = -c("weight"))
+
+lvls <- colnames(results.sc1)[-2]
+original_sc1_plot_data$model <- factor(original_sc1_plot_data$model, levels = lvls)
+  
+ggplot(data = original_sc1_plot_data) +
+  ggbeeswarm::geom_beeswarm(aes(x = model, y = prediction), priority = "density", size = 0.1, cex = 0.2) +
+theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+```
+
+When you average team RYM in, the distribution starts to look more like the gold/top performers: 
+
+```{r echo=TRUE, message=FALSE}
+
+ensemble_plot_data <-ensemble.sc1 %>% 
+  pivot_longer(names_to = "model", values_to = "prediction", cols = -c("weight"))
+
+lvls <- colnames(ensemble.sc1)[-2]
+ensemble_plot_data$model <- factor(ensemble_plot_data$model, levels = lvls)
+  
+ggplot(data = ensemble_plot_data) +
+  ggbeeswarm::geom_beeswarm(aes(x = model, y = prediction), priority = "density", size = 0.1, cex = 0.2) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+```
+
+My guess is that this is a fluke, probably caused by their generally more conservative predictions coincidentally helping reshape the overall distribution of the ensemble to better mirror that of the gold standard (at least, that's what the third plot I attached seems to demonstrate). SC1 also has substantially lower N than SC2/3, so maybe a better chance of getting lucky in this way. 
+
 ### Subchallenge 2
+
+SC2 results look more conventional : combine top models and increase performance a bit, but effect eventually disappears. 
 
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc2, bayes_top.sc2, "SC2")
@@ -388,70 +452,71 @@ plot_results(boot.sc2, bayes_top.sc2, "SC2")
 
 ### Subchallenge 3
 
+SC3 results look more conventional : combine top models and increase performance a bit, but effect eventually disappears. 
+
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc3, bayes_top.sc3, "SC3")
-plot_results(boot.sc3[,1:6], bayes_top.sc3, "SC3")
 ```
 
+# Rearrange SC1 ensemble. 
 
-## Pairwise T-test
+To check for coding errors (in addition to inspecting the code itself), lets reorganize the ensemble, "doping in" RYM far earlier to see if we get the same effect. We do: 
 
-Additionally, test the significance by performing a pairwise t-test across all predictions, then plot.
+```{r}
 
-```{r echo=FALSE}
-pairwise_ttest <- function(boot) {
-  apply(boot, 2, function(col_x) { 
-      apply(boot, 2, function(col_y) { 
-          t.test(col_x, col_y, paired=T)$p.value
-      })
-  }) %>% as_tibble(rownames = "team_a") %>% 
-  mutate_all(~replace(., is.nan(.), 1)) %>%
-  gather(team_b, pval, -team_a) %>% 
-  mutate(fdr = signif(p.adjust(pval, "fdr"),3)) 
-}
+### SC1
+submissions.sc1 <- lapply(names(pred_filenames), function(team) {
+  read.csv(pred_filenames[[team]]) %>% 
+    mutate_at(vars(-Patient_ID), ~ replace(., which(.<0), 0)) %>%
+    select(Patient_ID, Overall_Tol) %>%
+    rename(!!team := Overall_Tol)
+}) %>%
+  reduce(left_join, by="Patient_ID") %>%
+  left_join(gold.sc1, by="Patient_ID") %>%
+  rename(gold = Overall_Tol)
 
-sc1.pvals <- pairwise_ttest(boot.sc1)
-sc2.pvals <- pairwise_ttest(boot.sc2)
-sc3.pvals <- pairwise_ttest(boot.sc3)
+
+new_order <- c("Team Shirin", "Hongyang Li and Yuanfang Guan", "csabaibio", "Nc717", "zs_aicoe",
+               "RYM", "NAD", "Gold Therapy" ,"Alpine Lads",  "CU_DSI_RA2_Challenge",
+               "kichuDL","vladyorsh" ,"Aboensis V", "Zbigniew Wojna", "RA2 Baseline Model")
+
+results.sc1 <- submissions.sc1[,c("gold", "weight", new_order)]
+
+ensemble.sc1 <- sapply(3:ncol(results.sc1), function(x){
+  new_col <- results.sc1 %>% 
+    select(3:x) %>% 
+    rowMeans()
+}) %>% 
+  as.data.frame()
+
+ens_names <- c(glue::glue("{colnames(results.sc1)[3]}"), glue::glue("+{colnames(results.sc1)[-1:-3]}"))
+colnames(ensemble.sc1) <- ens_names
+
+ensemble.sc1 <- ensemble.sc1 %>% 
+  add_column(weight = results.sc1$weight) %>% 
+  add_column(gold = results.sc1$gold)
+
+ensemble.sc1 <- ensemble.sc1[,c("gold", "weight", ens_names)]
+
+bs_indices.sc1 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc1), N) %>%
+  apply(2, sample, replace = T)
+
+boot.sc1 <- apply(bs_indices.sc1, 2, function(ind) {
+  tmp.gold <- ensemble.sc1[ind,c(1:2)]
+  apply(ensemble.sc1[ind, -c(1:2)], 2, function(pred) {
+    sum_weighted_error(
+      log2(tmp.gold$gold + 1),
+      log2(pred + 1),
+      tmp.gold$weight
+    ) / sum(tmp.gold$weight)
+  })
+}) %>%
+  t()
+
+bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, invertBayes=F) %>%
+  as_tibble(rownames = "submission") %>%
+  rename(bayes = value)
+
+plot_results(boot.sc1, bayes_top.sc1, "SC1")
 ```
-
-### Subchallenge 1
-
-```{r echo=FALSE}
-sc1.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc1.pvals
-reactable(sc1.pvals, sortable=TRUE)
-```
-
-### Subchallenge 2
-
-```{r echo=FALSE}
-sc2.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc2.pvals
-reactable(sc2.pvals, sortable=TRUE)
-```
-
-### Subchallenge 3
-
-```{r echo=FALSE}
-sc3.pvals %>% 
-  ggplot(data = ., aes(x=team_a, y=team_b, fill=fdr)) + 
-  geom_tile() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-
-sc3.pvals
-reactable(sc3.pvals, sortable=TRUE)
-```
-
-
-
-
 
