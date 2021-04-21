@@ -31,7 +31,7 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', '#####')
+syn$login('ra2dreamservice', "Xe&2S6x1&d&h")
 
 ```
 
@@ -75,6 +75,7 @@ Then, assign each joint to a bins based on the mean predicted value for that joi
 Plot a box of the bins where x axis is the bin, and the y axis is the mean predicted score of each joint
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+#devtools::install_github("moodymudskipper/cutr")
 
 submission_sc2 <- submission %>% 
   group_by(Patient_ID, measurement) %>%
@@ -86,7 +87,7 @@ submission_sc2 <- submission %>%
   ungroup() %>% 
   mutate(bin = cutr::smart_cut(mean_score, i = 100, "n_by_group") %>% as.numeric())
   
-submission_bins<- submission %>% 
+submission_bins <- submission %>% 
   inner_join(submission_sc2) %>% 
   group_by(bin) %>% 
   mutate(pvalue = (length(score)))
@@ -94,10 +95,20 @@ submission_bins<- submission %>%
 gold_bins <- gold %>% 
   inner_join(submission_sc2) 
 
-ggplot(data = submission_sc2) +
-   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+submission_sc2_plot <- left_join(submission_sc2, gold_bins) %>% 
+  mutate(gold_score = score, mean_prediction = mean_score, .keep = 'unused') %>% 
+  pivot_longer(c("mean_prediction", "gold_score")) %>% 
+  mutate(combined_bin = ceiling(bin/3)) %>% 
+  mutate(combined_bin_label = paste0(floor((bin-1)/3)*3+1,"-",ceiling(combined_bin)*3))
 
+sc2_box <- ggplot(data = submission_sc2_plot) +
+  geom_boxplot(aes(x = as_factor(combined_bin_label), y = value, color = name))+
+  labs(x = "Assigned bin", y = "Mean predicted erosion (SvH)") +
+  scale_color_manual("Category",values = c("gold_score" = "#4D7298", "mean_prediction" = "#59CD90"), labels = c("Gold Standard Score", "Mean Prediction")) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 10)) 
 
+sc2_box
 ```
 
 Repeat the boxplot, but evaluating individual predicted scores in each bin:
@@ -146,6 +157,25 @@ ggplot(pvals) +
   theme_bw() +
   ggtitle("SC2 Gold Standard Scores")
 
+sc2 <- ggplot(pvals) +
+  geom_bar(aes(x = as.numeric(score), fill = fdr < 0.05)) +
+  theme_bw() +
+  scale_fill_manual("Flagged for review",values = c("FALSE" = "#a9def9", "TRUE" = "#F694C1"), labels = c("Not flagged (FDR > 0.05)","Flagged (FDR < 0.05)")) +
+  labs(x="SC2 gold standard (narrowing SvH)",
+       y="Count") 
+
+sc2 
+
+sc2 <- ggplot(pvals) +
+  geom_bar(aes(x = as.numeric(score), fill = fdr < 0.05), position = position_dodge2(width = 0.9, preserve = "single")) +
+  theme_bw() +
+  scale_fill_manual("Flagged for review",values = c("FALSE" = "#a9def9", "TRUE" = "#F694C1"), labels = c("Not flagged (FDR > 0.05)","Flagged (FDR < 0.05)")) +
+  scale_y_continuous(trans='log2') +
+  scale_x_continuous(breaks = scales::pretty_breaks(1)) +
+  labs(x="SC2 gold standard (narrowing SvH)",
+       y="Count") 
+
+sc2 
 
 pvals %>% 
   arrange(fdr) %>% 
@@ -187,8 +217,20 @@ submission_bins<- submission %>%
 gold_bins <- gold %>% 
   inner_join(submission_sc3) 
 
-ggplot(data = submission_sc3) +
-   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+submission_sc3_plot <- left_join(submission_sc3, gold_bins) %>% 
+  mutate(gold_score = score, mean_prediction = mean_score, .keep = 'unused') %>% 
+  pivot_longer(c("mean_prediction", "gold_score")) %>% 
+  mutate(combined_bin = ceiling(bin/3)) %>% 
+  mutate(combined_bin_label = paste0(floor((bin-1)/3)*3+1,"-",ceiling(combined_bin)*3))
+
+sc3_box <- ggplot(data = submission_sc3_plot) +
+  geom_boxplot(aes(x = as_factor(combined_bin_label), y = value, color = name))+
+  labs(x = "Assigned bin", y = "Mean predicted erosion (SvH)") +
+  scale_color_manual("Category",values = c("gold_score" = "#4D7298", "mean_prediction" = "#59CD90"), labels = c("Gold Standard Score", "Mean Prediction")) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 10)) 
+
+sc3_box
 
 ```
 
@@ -238,6 +280,14 @@ ggplot(pvals) +
   theme_bw() +
   ggtitle("SC3 Gold Standard Scores")
 
+sc3 <- ggplot(pvals) +
+  geom_bar(aes(x = as.numeric(score), fill = fdr < 0.05)) +
+  theme_bw() +
+  scale_fill_manual("Flagged for review",values = c("FALSE" = "#a9def9", "TRUE" = "#F694C1"), labels = c("Not flagged (FDR > 0.05)","Flagged (FDR < 0.05)")) +
+  labs(x="SC3 gold standard (erosion SvH)",
+       y="Count") 
+
+sc3 
 
 pvals %>% 
   arrange(fdr) %>% 
@@ -281,9 +331,18 @@ submission_bins<- submission %>%
 gold_bins <- gold %>% 
   inner_join(submission_sc1) 
 
-ggplot(data = submission_sc1) +
-   geom_boxplot(aes(x = as_factor(bin), y = mean_score))
+submission_sc1_plot <- left_join(submission_sc1, gold_bins) %>% 
+  mutate(gold_score = score, mean_prediction = mean_score, .keep = 'unused') %>% 
+  pivot_longer(c("mean_prediction", "gold_score"))
 
+sc1_box <- ggplot(data = submission_sc1_plot) +
+  geom_boxplot(aes(x = as_factor(bin), y = value, color = name))+
+  labs(x = "Assigned bin", y = "Mean overall prediction (SvH)") +
+  scale_color_manual("Category",values = c("gold_score" = "#4D7298", "mean_prediction" = "#59CD90"), labels = c("Gold Standard Score", "Mean Prediction")) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 10)) 
+
+sc1_box
 ```
 
 Repeat the boxplot, but evaluating individual predicted scores in each bin:
@@ -332,6 +391,15 @@ ggplot(pvals) +
   theme_bw() +
   ggtitle("SC1 Gold Standard Scores")
 
+sc1 <- ggplot(pvals) +
+  geom_bar(aes(x = as.numeric(score), fill = fdr < 0.05)) +
+  theme_bw() +
+  scale_fill_manual("Flagged for review",values = c("FALSE" = "#a9def9", "TRUE" = "#F694C1"), labels = c("Not flagged (FDR > 0.05)","Flagged (FDR < 0.05)")) +
+  labs(x="SC1 gold standard (overall SvH)",
+       y="Count") 
+
+sc1 
+
 
 pvals %>% 
   arrange(fdr) %>% 
@@ -343,3 +411,42 @@ write_csv(pvals, "sc1_empirical_pvalues.csv")
 glue::glue("Number of gold standard measurements with FDR <0.1: {nrow(pvals[pvals$fdr<0.1,])}")
 glue::glue("Percent of gold standard measurements with FDR <0.1: {round((nrow(pvals[pvals$fdr<0.1,])/nrow(pvals)),3)*100}%")
 ```
+
+## Plot figure
+
+```{r fig.height=6, fig.width=10}
+
+legend_top <- cowplot::get_legend(
+  # create some space to the left of the legend
+  sc2_box + theme(legend.box.margin = margin(0, 0, 0, 0))
+)
+
+legend_bot <- cowplot::get_legend(
+  # create some space to the left of the legend
+  sc2 + theme(legend.box.margin = margin(0, 0, 0, 0))
+)
+
+prow <- cowplot::plot_grid(
+  sc1_box + theme(legend.position="none"), 
+  sc2_box + theme(legend.position="none"),
+  sc3_box + theme(legend.position="none"),
+  sc1 + theme(legend.position="none"), 
+  sc2 + theme(legend.position="none"), 
+  sc3 + theme(legend.position="none"),
+  align = 'vh',
+  labels = "AUTO",
+  hjust = -1,
+  nrow = 2, 
+  scale = 0.95
+)
+
+leg<- cowplot::plot_grid(legend_top, legend_bot, nrow = 2)
+p<-cowplot::plot_grid(prow, leg, rel_widths = c(3, .7))
+
+p
+
+ggsave("Supplemental_figure_gold_standard.pdf")
+ggsave("Supplemental_figure_gold_standard.png")
+
+```
+

@@ -29,7 +29,12 @@ library(ggplot2)
 use_condaenv("synapse")
 synapseclient <- reticulate::import('synapseclient')
 syn <- synapseclient$Synapse()
-syn$login('ra2dreamservice', 'Xe&2S6x1&d&h')
+```
+
+```{r include=FALSE}
+#login
+syn$login()
+
 ```
 
 #### Functions 
@@ -295,8 +300,8 @@ cowplot::plot_grid(sc1,
                    sc3, 
                    ncol = 1, labels = c("A", "B", "C"))
 
-ggsave("supplemental_figure_comparison_to_baseline.png")
-ggsave("supplemental_figure_comparison_to_baseline.svg")
-ggsave("supplemental_figure_comparison_to_baseline.pdf")
+ggsave("../figures/supplemental_figure_comparison_to_baseline.png")
+ggsave("../figures/supplemental_figure_comparison_to_baseline.svg")
+ggsave("../figures/supplemental_figure_comparison_to_baseline.pdf")
 
 ```

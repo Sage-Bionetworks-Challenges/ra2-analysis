@@ -40,7 +40,7 @@ syn <- synapseclient$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', "Xe&2S6x1&d&h")
+syn$login()
 
 ```
 

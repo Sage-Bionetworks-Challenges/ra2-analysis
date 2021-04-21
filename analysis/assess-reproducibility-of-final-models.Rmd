@@ -39,7 +39,7 @@ syn <- synapseclient$Synapse()
 ```
 
 ```{r include = F}
-syn$login('ra2dreamservice', '###')
+syn$login('ra2dreamservice', '####')
 ```
 
 Thomas Yu re-ran all of the final models on the leaderboard. 
@@ -104,7 +104,7 @@ comparisons <- apply(predictions, 1, function(x){
 
 Calculate correlation and plot for SC1 predictions. 
 
-```{r echo=TRUE, message=FALSE, warning=FALSE}
+```{r echo=TRUE, fig.height=5, fig.width=5, message=FALSE, warning=FALSE}
 
 cors <- lapply(comparisons, function(x){
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
@@ -113,23 +113,35 @@ cors <- lapply(comparisons, function(x){
 
 reactable::reactable(cors, sortable = T)
 
-lapply(comparisons, function(x){
+comps <- lapply(comparisons, function(x){
   team <- unique(x['team'])
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
-  ggplot(x) +
-    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
-    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
-}) 
+  
+  df <- x %>%     
+    filter(variable == 'Overall_Tol') %>%
+    mutate(team = team) %>% 
+    mutate(Spearman = round(sp$estimate[[1]],3)) %>% 
+    mutate(p = sp$p.value)
+    
+}) %>% dplyr::bind_rows()
 
+sc1 <- ggplot(comps) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    labs(title = "Subchallenge 1", 
+         x = 'Final Round Predictions (SvH)',
+         y = 'Replicate Predictions (SvH)') +
+  facet_wrap(~glue::glue("{stringr::str_wrap(team,20)},\n Spearman: {Spearman}")) +
+  theme_bw() +
+  theme(strip.text.x = element_text(margin = margin(b = 0, t = 0)))
 
-
+sc1
 ```
 
 ## SC2
 
 Calculate correlation and plot for SC2 predictions .
 
-```{r echo=TRUE, message=FALSE, warning=FALSE}
+```{r echo=TRUE, fig.height=5, fig.width=5, message=FALSE, warning=FALSE}
 
 cors <- lapply(comparisons, function(x){
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
@@ -138,22 +150,35 @@ cors <- lapply(comparisons, function(x){
 
 reactable::reactable(cors, sortable = T)
 
-lapply(comparisons, function(x){
+comps <- lapply(comparisons, function(x){
   team <- unique(x['team'])
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
-  ggplot(x) +
-    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
-    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
-}) 
+  
+  df <- x %>%     
+    filter(grepl('.+_J__.+', variable)) %>% 
+    mutate(team = team) %>% 
+    mutate(Spearman = round(sp$estimate[[1]],3)) %>% 
+    mutate(p = sp$p.value)
+    
+}) %>% dplyr::bind_rows()
 
+sc2 <- ggplot(comps) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    labs(title = "Subchallenge 2", 
+         x = 'Final Round Predictions (SvH)',
+         y = 'Replicate Predictions (SvH)') +
+  facet_wrap(~glue::glue("{stringr::str_wrap(team,20)},\n Spearman: {Spearman}")) +
+  theme_bw() +
+  theme(strip.text.x = element_text(margin = margin(b = 0, t = 0)))
 
+sc2
 ```
 
 ## SC3
 
 Calculate and plot correlation for SC3 predictions.
 
-```{r echo=TRUE, message=FALSE, warning=FALSE}
+```{r echo=TRUE, fig.height=5, fig.width=5, message=FALSE, warning=FALSE}
 
 cors <- lapply(comparisons, function(x){
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
@@ -162,13 +187,39 @@ cors <- lapply(comparisons, function(x){
 
 reactable::reactable(cors, sortable = T)
 
-lapply(comparisons, function(x){
+comps <- lapply(comparisons, function(x){
   team <- unique(x['team'])
   sp <- cor.test(x$fastlane_prediction, x$leaderboard_prediction, method = "spearman")
-  ggplot(x) +
-    geom_point(aes(x = fastlane_prediction, y = leaderboard_prediction)) +
-    labs(title = glue::glue("{team}; spearman correlation: {round(sp$estimate[[1]],3)}; p-value: {sp$p.value}"))
-}) 
+  
+  df <- x %>%     
+    filter(grepl('.+_E__.+', variable)) %>% 
+    mutate(team = team) %>% 
+    mutate(Spearman = round(sp$estimate[[1]],3)) %>% 
+    mutate(p = sp$p.value)
+    
+}) %>% dplyr::bind_rows()
 
+sc3 <- ggplot(comps) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    labs(title = "Subchallenge 3", 
+         x = 'Final Round Predictions (SvH)',
+         y = 'Replicate Predictions (SvH)') +
+  facet_wrap(~glue::glue("{stringr::str_wrap(team,20)},\n Spearman: {Spearman}")) +
+  theme_bw() +
+  theme(strip.text.x = element_text(margin = margin(b = 0, t = 0)))
+
+sc3
+```
+
+## Figure 
+
+Put it all together for a supplemental figure. 
+
+```{r fig.height=15, fig.width=5}
+
+cowplot::plot_grid(sc1, sc2, sc3, ncol = 1, labels = "AUTO", label_size = 20)
+ggsave("Supplemental_Figure_reproducibility.pdf")
+ggsave("Supplemental_Figure_reproducibility.png")
 
 ```
+

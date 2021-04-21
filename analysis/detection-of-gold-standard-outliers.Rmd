@@ -50,15 +50,15 @@ submission <- lapply(tab$prediction_fileid, function(x){
 }) %>% bind_rows()
 
 # gold <-  path  %>% 
-#   readr::read_csv() %>% 
-#   tidyr::gather(measurement, score, -Patient_ID) %>% 
-#   mutate(prediction = 'gold')
-
-submission_zscores <- bind_rows(submission, gold) %>% 
-  group_by(Patient_ID, measurement) %>% 
-  mutate(zscore = (score - mean(score))/sd(score)) %>% 
-  mutate(zscore = signif(zscore, 3)) %>% 
-  ungroup
+#    readr::read_csv() %>% 
+#    tidyr::gather(measurement, score, -Patient_ID) %>% 
+#    mutate(prediction = 'gold')
+# 
+# submission_zscores <- bind_rows(submission, gold) %>% 
+#   group_by(Patient_ID, measurement) %>% 
+#   mutate(zscore = (score - mean(score))/sd(score)) %>% 
+#   mutate(zscore = signif(zscore, 3)) %>% 
+#   ungroup
 
 ```
 
