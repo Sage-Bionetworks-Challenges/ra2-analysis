@@ -31,7 +31,7 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', "***REMOVED***")
+syn$login('ra2dreamservice', "####")
 
 ```
 
