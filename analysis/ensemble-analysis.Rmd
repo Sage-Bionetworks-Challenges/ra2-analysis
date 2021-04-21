@@ -31,7 +31,7 @@ First, import packages, scoring functions, and challenge data.
 library(tidyverse)
 library(reticulate)
 # library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+# use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
 synapse <- import('synapseclient')
 syn <- synapse$Synapse()
 
@@ -226,7 +226,6 @@ ensemble.sc2 <- ensemble.sc2 %>%
 ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
-  cor <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc2) +
     geom_point(aes(x = score, y = !!sym(x))) +
     ggtitle(glue::glue("spearman = {cor}"))
@@ -355,6 +354,25 @@ bayes_top.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=1, i
 # }
 ```
 
+
+### Subchallenge 1
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc1
+```
+
+### Subchallenge 2
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc2
+```
+
+### Subchallenge 3
+
+```{r echo=FALSE, message=FALSE}
+bayes_top.sc3
+```
+
 ---
 
 ## Plot Results
@@ -363,16 +381,23 @@ Plot boxplot of all scores, coloring the boxes by Bayes factor.
 
 ```{r echo=TRUE, message=FALSE}
 plot_results <- function(results, bayes, subchallenge) {
+  first_score <- mean(results[,1])
+  
   res <- results %>%
     as_tibble() %>%
     gather(submission, bs_score) %>%
     left_join(bayes) %>%
+    group_by(submission) %>% 
+    mutate(mean_score = mean(bs_score)) %>% 
+    ungroup() %>% 
     mutate(bayes_category=case_when(
       bayes == 0 ~ "Reference",
-      bayes<=3 ~ "<3",
-      bayes>=3 & bayes <5 ~ "3-5",
-      bayes>=5 & bayes <10 ~ "5-10",
-      bayes>=10 ~ ">10")) 
+      mean_score < first_score & bayes<=3 ~ "<3, better",
+      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
+      mean_score < first_score & bayes>=10 ~ ">10, better",
+      mean_score > first_score & bayes<=3 ~ "<3, worse",
+      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
+      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
   
   lvls <- colnames(results)
   res$submission <- factor(res$submission, levels = lvls)
@@ -387,11 +412,13 @@ plot_results <- function(results, bayes, subchallenge) {
     geom_boxplot() +
     theme_bw() +
     scale_color_manual(values = c(
-      "Reference"="#d32e36", 
-      '<3' = '#cf4d6f', 
-      "3-5" = "#cc7e85",
-      "5-10" = '#c5afa4', 
-      ">10" = "#a8a6a4"),
+      "Reference"="#000000", 
+      '<3, better' = '#AA3F0E', 
+      "3-10, better" = '#E15514', 
+      ">10, better" = "#EF7B45",
+      '<3, worse' = '#024DB6', 
+      "3-10, worse" = '#035EDD', 
+      ">10, worse" = "#3689FC"),
       name = "Bayes Factor") +
     labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
@@ -404,8 +431,13 @@ SC1 ensemble results are a little odd. Adding in RYM has a pretty substantial ef
 
 ```{r echo=TRUE, message=FALSE}
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
+plot_results_path(boot.sc1, bayes_top.sc1, "SC1")
+```
 
 
+```{r echo=TRUE, message=FALSE}
+plot_results(boot.sc2, bayes_top.sc2, "SC2")
+plot_results_path(boot.sc2, bayes_top.sc2, "SC2")
 ```
 
 If we look at the raw predictions in a beeswarm plot, we see that RYM's predictions seem (on average) to be more conservative than the people that perform better (ie less likely to predict 0s or large values).  It's possible that this is causing the effect that we see in the ensemble. 
@@ -519,4 +551,3 @@ bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, i
 
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
 ```
-
