@@ -11,6 +11,8 @@ Adjust a directory of JPEG image files, writing the adjusted images to outdir.
 Won't overwrite existing files.
 
 See adjust_image for the actual remapping code.
+
+Author: Isaac Dimitrovsky
 """
 
 import numpy as np
