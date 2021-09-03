@@ -20,26 +20,30 @@ First, load packages and download View of all submissions. We'll consider only t
 library(tidyverse)
 library(reticulate)
 library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
-synapse <- import('synapseclient')
-syn <- synapse$Synapse()
 
+use_condaenv("ra2dream", required = T)
+synapseclient <- reticulate::import('synapseclient')
+syn <- synapseclient$Synapse()
 
 ```
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', '#####')
+syn$login()
 
 ```
 
 Then, calculate the z-scores for each prediction and gold standard value, grouped by Patient_ID and measurement (i.e. z scores calculated within each group, not across every group).
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-tab <- syn$tableQuery('select * from syn22236264')$asDataFrame() %>% 
-  filter(status == "ACCEPTED") %>% 
+##filtered out Sha2256:6cb365.... because this was the wrong baseline model; we re-ran with the correct baseline (sha:2d72ae6...)
+
+tab <- syn$tableQuery("select * from syn22236264 WHERE status = 'ACCEPTED' AND 
+    submitterid <> 3408914 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>% 
   group_by(submitterid) %>% 
-  top_n(1, createdOn) %>% 
+  slice(which.max(createdOn)) %>%
+  select(-createdOn) %>% 
   ungroup
 
 submission <- lapply(tab$prediction_fileid, function(x){
@@ -49,16 +53,16 @@ submission <- lapply(tab$prediction_fileid, function(x){
     mutate(prediction = {{x}})
 }) %>% bind_rows()
 
-# gold <-  path  %>% 
-#    readr::read_csv() %>% 
-#    tidyr::gather(measurement, score, -Patient_ID) %>% 
-#    mutate(prediction = 'gold')
-# 
-# submission_zscores <- bind_rows(submission, gold) %>% 
-#   group_by(Patient_ID, measurement) %>% 
-#   mutate(zscore = (score - mean(score))/sd(score)) %>% 
-#   mutate(zscore = signif(zscore, 3)) %>% 
-#   ungroup
+gold <- syn$get("syn22254942")$path %>% 
+   readr::read_csv() %>% 
+   tidyr::gather(measurement, score, -Patient_ID) %>% 
+  mutate(prediction = 'gold')
+
+submission_zscores <- bind_rows(submission, gold) %>%
+  group_by(Patient_ID, measurement) %>%
+  mutate(zscore = (score - mean(score))/sd(score)) %>%
+  mutate(zscore = signif(zscore, 3)) %>%
+  ungroup
 
 ```
 

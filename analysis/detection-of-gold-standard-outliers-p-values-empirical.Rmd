@@ -22,30 +22,32 @@ We'll consider only the top half of submissions (top 8 of 15).
 library(tidyverse)
 library(reticulate)
 library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
-synapse <- import('synapseclient')
-syn <- synapse$Synapse()
 
+use_condaenv("ra2dream", required = T)
+synapseclient <- reticulate::import('synapseclient')
+syn <- synapseclient$Synapse()
 
 ```
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', "####")
+syn$login()
 
 ```
 
 Retrieve the submissions, only considering the top 50% as determined by SC1. 
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
+##filtered out Sha2256:6cb365.... because this was the wrong baseline model; we re-ran with the correct baseline (sha:2d72ae6...)
 
-tab <- syn$tableQuery('select * from syn22236264')$filepath %>% 
-      readr::read_csv() %>% 
-  filter(status == "ACCEPTED") %>% 
+tab <- syn$tableQuery("select * from syn22236264 WHERE status = 'ACCEPTED' AND 
+    submitterid <> 3408914 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>% 
   group_by(submitterid) %>% 
-  top_n(1, createdOn) %>% 
+  slice(which.max(createdOn)) %>%
+  select(-createdOn) %>% 
   ungroup %>% 
-  filter(submitterid != 3408914) %>% 
+  select(-leaderboard_prediction_file_status) %>% 
   write_csv("submission_table.csv")
 
 top_methods <- tab %>% top_n(ceiling(nrow(tab)/2), -sc1_weighted_sum_error)

@@ -32,14 +32,14 @@ library(ggplot2)
 library(reactable)
 
 # Synapse setup to use `reticulate`
-use_condaenv("synapse-2")
+use_condaenv("ra2dream", required = T) #conda environment with synapse >2.0 installed
 synapseclient <- reticulate::import('synapseclient')
 challengeutils <- reticulate::import('challengeutils')
 syn <- synapseclient$Synapse()
 ```
 
 ```{r include = F}
-syn$login('ra2dreamservice', '####')
+syn$login()
 ```
 
 Thomas Yu re-ran all of the final models on the leaderboard. 
@@ -59,8 +59,8 @@ new_predictions <- tibble::tribble(
 "9706119","syn22269993","kichuDL",9705546,
 "9706120","syn22270215","Nc717",9705454,
 "9706121","syn22270026","NAD",9705412,
-"9706122","syn22270412","akshat85",9704854,
-"9706123","syn22270653","vladyorsh",9704778,
+# "9706122","syn22270412","akshat85",9704854, DQ
+# "9706123","syn22270653","vladyorsh",9704778, DQ
 "9706124","syn22270182","csabaibio",9704597,
 "9706125","syn22270261","Gold Therapy",9704323
 )
@@ -126,7 +126,7 @@ comps <- lapply(comparisons, function(x){
 }) %>% dplyr::bind_rows()
 
 sc1 <- ggplot(comps) +
-    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction)) +
     labs(title = "Subchallenge 1", 
          x = 'Final Round Predictions (SvH)',
          y = 'Replicate Predictions (SvH)') +
@@ -163,7 +163,7 @@ comps <- lapply(comparisons, function(x){
 }) %>% dplyr::bind_rows()
 
 sc2 <- ggplot(comps) +
-    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction)) +
     labs(title = "Subchallenge 2", 
          x = 'Final Round Predictions (SvH)',
          y = 'Replicate Predictions (SvH)') +
@@ -200,7 +200,7 @@ comps <- lapply(comparisons, function(x){
 }) %>% dplyr::bind_rows()
 
 sc3 <- ggplot(comps) +
-    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction, color = Spearman)) +
+    geom_point(aes(x = leaderboard_prediction, y = fastlane_prediction)) +
     labs(title = "Subchallenge 3", 
          x = 'Final Round Predictions (SvH)',
          y = 'Replicate Predictions (SvH)') +

@@ -1,0 +1,388 @@
+---
+title: 'TEAR Validation - *adjusted* dataset - prediction scoring'
+author: "Robert Allaway (Sage Bionetworks)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    df_print: paged
+    code_fold: hide
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+## Introduction 
+
+We have an independent dataset, TEAR, that also has hand and foot RA images. We tested the 15 final round docker containers on an independent TEAR cohort of 50 individuals to assess which methods are most stable in new datasets. For this experiment, we adjusted the dataset by normalizing the signal intensity for each image. This is because the original TEAR dataset had many images with poor contrast and high intensity, washing out many of the joint. Note: the gold standard scores for each image are from the original dataset, as we don't have any way of rescoring/adjusting those values. However, it's reasonable to assume that a trained observer, particularly with access to the original films, would be able to overcome the image issues in the original dataset more effectively than a model trained on a higher-quality dataset. The code used to adjust the files is available in this repository as "imadjust.py". 
+
+## Setup
+
+First, import packages for data manipulation and retrieve prediction data, gold standard data, and the template for use in the scoring code. Don't forget to set a seed!
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(98109)
+
+library(tidyverse)
+library(reticulate)
+library(challengescoring)
+library(ggplot2)
+library(reactable)
+
+# Synapse setup to use `reticulate`
+use_condaenv("challenge", required = T)
+synapseclient <- reticulate::import('synapseclient')
+syn <- synapseclient$Synapse()
+```
+
+```{r include=FALSE}
+#login
+syn$login()
+
+```
+
+#### Functions 
+
+Additionally, define functions to help with the scoring algorithms.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# 
+calculate_weight <- function(x){
+  weight <- dplyr::if_else(x == 0, 1,
+            dplyr::if_else(x == 1, 2,
+            dplyr::if_else(x>=2 & x<=3, 2.143547,
+            dplyr::if_else(x>=4 & x<=7, 3.863745,
+            dplyr::if_else(x>=8 & x<=20, 8,
+            dplyr::if_else(x>=21 & x<=55, 16,
+            dplyr::if_else(x>=56 & x<=148, 32,
+            dplyr::if_else(x>=148, 64, 0))))))))
+  return(weight)
+}
+
+# 
+sum_weighted_error <- function(gold, pred, weight){
+  sum(weight*abs(gold - pred))
+}
+
+rmse <- function(gold, pred){
+  sqrt(mean((gold - pred) ** 2))
+}
+
+score_log2 <- function(gold_path, prediction_path){
+  
+  pred <- readr::read_csv(prediction_path) %>% 
+    dplyr::mutate_at(vars(-Patient_ID), ~ replace(., which(.<0), 0))
+  gold <- readr::read_csv(gold_path) 
+  
+  ##score SC1 
+  gold_sc1 <- gold %>% 
+    dplyr::select(Patient_ID, Overall_Tol) %>% 
+    dplyr::mutate(weight = calculate_weight(Overall_Tol))
+  
+  pred_sc1 <- pred %>% 
+    dplyr::select(Patient_ID, Overall_Tol) %>% 
+    dplyr::rename(Overall_Tol_pred = Overall_Tol)
+  
+  sc1_weighted_sum_error <- dplyr::full_join(pred_sc1, gold_sc1, by = "Patient_ID") %>% 
+    dplyr::summarize(result = sum_weighted_error(log2(Overall_Tol+1), log2(Overall_Tol_pred+1), weight)/sum(weight)) %>% 
+                       purrr::pluck("result")
+                     
+                     ##does sc2/3 prediction exist?
+                     gold_joints <- gold %>% 
+                       dplyr::mutate(weight = calculate_weight(Overall_Tol)) %>% 
+                       dplyr::select(-Overall_Tol) %>% 
+                       tidyr::gather('joint', 'score', -Patient_ID, -weight)
+                     
+                     pred_joints <- pred %>% 
+                       dplyr::select(-Overall_Tol) %>% 
+                       tidyr::gather('joint', 'pred_score', -Patient_ID)
+                     
+                     sc2_sc3 <- dplyr::full_join(pred_joints, gold_joints, by = c("Patient_ID","joint"))
+                     
+                     ##if participants set all joint values to 0, we will just return NA for sc2/3
+                     if(!all(pred_joints$pred_score == 0)){
+                       
+                       #score sc2
+                       sc2_total_weighted_sum_error <- sc2_sc3 %>% 
+                         dplyr::filter(grepl('Overall_erosion', joint)) %>%
+                         dplyr::summarize(result = sum_weighted_error(log2(score+1), log2(pred_score+1), weight)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc2_joint_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl(".+_E__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc2_hand_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl("[RL]H.+_E__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc2_foot_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl("[RL]F.+_E__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       ##score SC3
+                       sc3_total_weighted_sum_error <- sc2_sc3 %>% 
+                         dplyr::filter(grepl('Overall_narrowing', joint)) %>%
+                         dplyr::summarize(result = sum_weighted_error(log2(score+1), log2(pred_score+1), weight)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc3_joint_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl(".+_J__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc3_hand_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl("[RL]H.+_J__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       sc3_foot_weighted_sum_rmse <- sc2_sc3 %>% 
+                         dplyr::filter(grepl("[RL]F.+_J__.+", joint)) %>% 
+                         dplyr::group_by(Patient_ID, weight) %>% 
+                         dplyr::summarize(patient_rmse = rmse(log2(score+1), log2(pred_score+1))) %>% 
+                         dplyr::ungroup() %>% 
+                         dplyr::summarize(result= sum(weight*patient_rmse)/sum(weight)) %>% 
+                         purrr::pluck("result")
+                       
+                       
+                     }else{
+                       sc2_total_weighted_sum_error <- NA
+                       sc2_joint_weighted_sum_rmse <- NA
+                       sc2_hand_weighted_sum_rmse <- NA 
+                       sc2_foot_weighted_sum_rmse <- NA
+                       sc3_total_weighted_sum_error <- NA
+                       sc3_joint_weighted_sum_rmse <- NA
+                       sc3_hand_weighted_sum_rmse <- NA
+                       sc3_foot_weighted_sum_rmse <- NA 
+                     }
+                     
+                     score <- c(
+                       "sc1_weighted_sum_error" = sc1_weighted_sum_error,
+                       "sc2_total_weighted_sum_error" = sc2_total_weighted_sum_error,
+                       "sc2_joint_weighted_sum_rmse" = sc2_joint_weighted_sum_rmse,
+                       "sc2_hand_weighted_sum_rmse" = sc2_hand_weighted_sum_rmse, 
+                       "sc2_foot_weighted_sum_rmse" = sc2_foot_weighted_sum_rmse,
+                       "sc3_total_weighted_sum_error" = sc3_total_weighted_sum_error,
+                       "sc3_joint_weighted_sum_rmse" = sc3_joint_weighted_sum_rmse,
+                       "sc3_hand_weighted_sum_rmse" = sc3_hand_weighted_sum_rmse, 
+                       "sc3_foot_weighted_sum_rmse" = sc3_foot_weighted_sum_rmse
+                     )
+                     
+                     return(score)
+                     
+}
+
+
+```
+
+#### Goldstandard
+
+The assessment of subchallenge 1 utilizies known SvH scores and subchallenges 2 & 3 known individual joint narrowing and erosion scores. After adding a weight for each joint score, split the goldstandard accordingly. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+gold_1 <- syn$get("syn25324263")$path
+
+gold_2 <- syn$get("syn25324262")$path
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+query <- syn$tableQuery(
+  "SELECT id, prediction_fileid, orginial_submitterid as original_submitterid, createdOn,
+    sc1_weighted_sum_error AS sc1, 
+    sc2_joint_weighted_sum_rmse AS sc2, 
+    sc3_joint_weighted_sum_rmse AS sc3
+  FROM syn25710243 WHERE status = 'ACCEPTED' and 
+    orginial_submitterid <> 3408914 AND
+    orginial_submitterid <> 3399952 AND
+  dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() 
+
+# For easier identification, replace each team/participant's submitterid with
+# their team name/username.
+query$original_submitterid <- as.character(query$original_submitterid)
+
+team_names <- sapply(query$original_submitterid, function(sub) {
+  name <- tryCatch({
+    syn$getUserProfile(sub)$userName
+  }, error = function(err) {
+    syn$getTeam(sub)$name
+  })
+  return(name)
+})
+
+query$original_submitterid <- team_names
+
+pred_filenames <- lapply(query$prediction_fileid, function(id) {
+  syn$get(id)$path
+})
+
+names(pred_filenames) <- team_names
+
+# Before bootstrapping, rearrange the teams by rank, where left = better 
+# performance and right = not-as-great performance.
+
+### SC1
+test1_scores <- sapply(pred_filenames, score_log2, gold_path = gold_1) %>% 
+  t() %>% 
+  as_tibble(rownames = "team") %>% 
+  tidyr::pivot_longer(names_to = "category", values_to = "score_1", cols = -c("team"))
+
+test2_scores <- sapply(pred_filenames, score_log2, gold_path = gold_2) %>% 
+  t() %>% 
+  as_tibble(rownames = "team") %>%
+  tidyr::pivot_longer(names_to = "category", values_to = "score_2", cols = -c("team"))
+
+all_scores <- full_join(test1_scores, test2_scores) %>% 
+  filter(category %in% c("sc1_weighted_sum_error", "sc2_joint_weighted_sum_rmse", "sc3_joint_weighted_sum_rmse"))
+
+ggplot(data = all_scores) +
+  geom_point(aes(x = score_1, y = score_2)) +
+    ggrepel::geom_text_repel(aes(x= score_1, y = score_2, label = team), size = 2, force = 200, box.padding = 0.1, min.segment.length = 0, direction = "both", segment.colour = "darkgray") +
+  facet_wrap(category ~ ., scales = 'free') + 
+  labs(x = "Gold standard one", y = "Gold standard two") +
+  theme_bw()
+
+ggsave("tear_adjusted_dual_gold_standards.pdf", width = 10, height = 4)
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+mean_validation <- all_scores %>% 
+  filter(category %in% c("sc1_weighted_sum_error", "sc2_joint_weighted_sum_rmse", "sc3_joint_weighted_sum_rmse")) %>% 
+  mutate(mean_validation_score = ((score_1+score_2)/2))
+
+##get final round submissions
+query <- syn$tableQuery(
+  "SELECT id, prediction_fileid, submitterid, createdOn,
+    sc1_weighted_sum_error, 
+    sc2_joint_weighted_sum_rmse, 
+    sc3_joint_weighted_sum_rmse
+  FROM syn22236264 WHERE status = 'ACCEPTED' AND 
+    submitterid <> 3408914 AND
+    submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>%
+  group_by(submitterid) %>%
+  slice(which.max(createdOn)) %>%
+  select(-createdOn)  
+  
+query$submitterid <- as.character(query$submitterid)
+
+team_names <- sapply(query$submitterid, function(sub) {
+  name <- tryCatch({
+    syn$getUserProfile(sub)$userName
+  }, error = function(err) {
+    syn$getTeam(sub)$name
+  })
+  return(name)
+})
+
+query$team <- team_names
+
+original_scores <- query %>% 
+  ungroup() %>% 
+  select(team, sc1_weighted_sum_error, sc2_joint_weighted_sum_rmse, sc3_joint_weighted_sum_rmse) %>% 
+  tidyr::pivot_longer(names_to = "category", values_to = "score_orig", cols = -c("team"))
+
+valid_vs_original <- mean_validation %>% 
+  select(team, category, mean_validation_score) %>% 
+  full_join(original_scores) %>% 
+  filter(team != 'vladyorsh') %>%  ## don't have validation predictions for this submitter
+  mutate(sc = case_when(category == "sc1_weighted_sum_error" ~ "Subchallenge 1",
+                   category == "sc2_joint_weighted_sum_rmse" ~ "Subchallenge 2",
+                   category == "sc3_joint_weighted_sum_rmse" ~ "Subchallenge 3"))
+
+
+
+
+plts <- lapply(unique(valid_vs_original$sc), function(x){
+  if(x == "Subchallenge 1"){
+    lims <- c(0, 4.75)
+  }else{
+    lims <- c(0,1)
+  }
+  
+ggplot(data = valid_vs_original %>% filter(sc %in% x)) +
+  geom_point(aes(x = score_orig, y = mean_validation_score), size = 0.75, alpha = 0.5) +
+  labs(x = "Final round score", y = "Post-challenge validation score (mean)") +
+  xlim(lims) +
+  ylim(lims) +
+  theme_bw() + 
+  geom_hline(data = valid_vs_original %>% 
+                   filter(sc %in% x) %>% 
+                   filter(team == "RA2 Baseline Model") %>% distinct(), 
+             aes(yintercept = mean_validation_score),
+             color = '#DD0426',
+             alpha = 0.25,
+             linetype = "dashed",
+             size = 1) + ##shows whether better than baseline 
+  geom_vline(data = valid_vs_original %>% 
+                   filter(sc %in% x) %>% 
+                   filter(team == "RA2 Baseline Model") %>% distinct(), 
+             aes(xintercept = score_orig),
+             color = '#FFA62B',
+             alpha = 0.5,
+             linetype = "dashed",
+             size = 1) + ##shows whether better than baseline 
+  geom_abline(slope = 1,              
+             color = '#009FB7',
+             alpha = 0.5,
+             linetype = "dashed",
+             size = 1) + ##shows whether better across final vs validation rnd
+  ggrepel::geom_text_repel(aes(x= score_orig, y = mean_validation_score, label = team), size = 2, force = 10, point.padding = 0.05, box.padding = 0.5, segment.colour = "darkgray", max.overlaps = 100, min.segment.length = 0.001, direction = "both") 
+})
+
+cowplot::plot_grid(plotlist = plts, rows = 1)
+ggsave("tear_adjusted_vs_final_round.pdf", width = 12, height = 4)
+
+valid_vs_original_gathered <-  valid_vs_original %>% 
+  tidyr::pivot_longer(names_to = "orig_vs_valid", values_to = "score", cols = -c("team","category","sc")) %>% 
+  mutate(label = case_when(orig_vs_valid == "mean_validation_score" ~ "Validation \n score (mean)",
+                   orig_vs_valid == "score_orig" ~ "Final round \n score")) %>% 
+  group_by(label, sc) %>%
+  mutate(ranks = rank(score))
+
+ord <- c("Final round \n score", "Validation \n score (mean)")
+
+     
+ggplot(data = valid_vs_original_gathered,
+       aes(x = fct_relevel(label, ord), y = ranks, color = team)) +
+  geom_point() +
+  geom_text(data = filter(valid_vs_original_gathered, orig_vs_valid == 'mean_validation_score'),
+            aes(x = fct_relevel(label, ord), y = ranks, label = team), hjust = "left", nudge_x = 0.05, size = 2.4) +
+  geom_line(aes(group = team))+
+  facet_wrap(. ~ sc, nrow = 1, scales = 'free') + 
+  labs(x = "Round", y = "Rank") +
+  shades::hue(scale_color_viridis_d("Team", option = "C", direction = -1), shades::scalefac(0.80)) +
+  theme_bw() +
+  scale_y_continuous(labels = scales::label_ordinal(), breaks = scales::breaks_width(1)) +
+  scale_x_discrete(expand = expansion(mult = c(.2, 1.6)))
+
+ggsave("tear_adjusted_vs_final_round_lineplot.pdf", width = 12, height = 4)
+
+
+```
+

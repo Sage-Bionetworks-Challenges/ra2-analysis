@@ -33,14 +33,14 @@ library(ggplot2)
 library(reactable)
 
 # Synapse setup to use `reticulate`
-use_condaenv("synapse-2")
+use_condaenv("ra2dream")
 synapseclient <- reticulate::import('synapseclient')
 syn <- synapseclient$Synapse()
 ```
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', "###")
+syn$login()
 
 ```
 
@@ -216,7 +216,10 @@ query <- syn$tableQuery(
     sc1_weighted_sum_error AS sc1, 
     sc2_joint_weighted_sum_rmse AS sc2, 
     sc3_joint_weighted_sum_rmse AS sc3
-  FROM syn25186123 WHERE status = 'ACCEPTED'")$asDataFrame() 
+  FROM syn25186123 WHERE status = 'ACCEPTED' AND 
+    original_submitterid <> 3408914 AND
+    original_submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() 
 
 # For easier identification, replace each team/participant's submitterid with
 # their team name/username.
@@ -281,7 +284,9 @@ query <- syn$tableQuery(
     sc2_joint_weighted_sum_rmse, 
     sc3_joint_weighted_sum_rmse
   FROM syn22236264 WHERE status = 'ACCEPTED' AND 
-    submitterid <> 3408914")$asDataFrame() %>%
+    submitterid <> 3408914 AND
+    submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>%
   group_by(submitterid) %>%
   slice(which.max(createdOn)) %>%
   select(-createdOn)  
