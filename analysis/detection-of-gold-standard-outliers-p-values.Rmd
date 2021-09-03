@@ -20,7 +20,7 @@ First, load packages and download View of all submissions. We'll consider only t
 library(tidyverse)
 library(reticulate)
 library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+use_condaenv("ra2dream") #conda environment with synapse >2.0 installed
 synapse <- import('synapseclient')
 syn <- synapse$Synapse()
 
@@ -29,7 +29,7 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', '#####')
+syn$login()
 
 ```
 

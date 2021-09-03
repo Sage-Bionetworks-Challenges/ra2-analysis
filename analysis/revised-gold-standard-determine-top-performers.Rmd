@@ -33,7 +33,7 @@ library(ggplot2)
 library(reactable)
 
 # Synapse setup to use `reticulate`
-use_condaenv("synapse-2")
+use_condaenv("ra2dream", required = T)
 synapseclient <- reticulate::import('synapseclient')
 syn <- synapseclient$Synapse()
 ```
@@ -108,13 +108,19 @@ Read in prediction files, combine, then bootstrap the predictions + a gold stand
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 N <- 1000  # number of bootstrapped scores to be calculated
 
+
+##filtered out Sha2256:6cb.... because this was the wrong baseline model; we re-ran with the correct baseline 
+
 query <- syn$tableQuery(
   "SELECT id, prediction_fileid, submitterid, createdOn,
     sc1_weighted_sum_error AS sc1, 
     sc2_joint_weighted_sum_rmse AS sc2, 
     sc3_joint_weighted_sum_rmse AS sc3
   FROM syn22236264 WHERE status = 'ACCEPTED' AND 
-    submitterid <> 3408914")$asDataFrame() %>%
+    submitterid <> 3408914 AND 
+    submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>% 
+   ## remove participants that did not submit writeup to final round (3408914 and 3399952)
   group_by(submitterid) %>%
   slice(which.max(createdOn)) %>%
   select(-createdOn)
@@ -373,18 +379,17 @@ computeBayesFactorWhereRefIsNotBest <- function(bootstrapMetricMatrix,
 }
 
 # Baseline: RA2 Baseline Model (columns 15, 12 and 10)
-bayes_baseline.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=15, invertBayes=F) %>%
+bayes_baseline.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=12, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes_baseline = value)
 
-bayes_baseline.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=12, invertBayes=F) %>%
+bayes_baseline.sc2 <- computeBayesFactorWhereRefIsNotBest(boot.sc2, refPredIndex=14, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes_baseline = value)
 
-bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=10, invertBayes=F) %>%
+bayes_baseline.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=13, invertBayes=F) %>%
   as_tibble(rownames = "submission") %>%
   rename(bayes_baseline = value)
-
 
 ```
 

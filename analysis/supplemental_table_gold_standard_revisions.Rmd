@@ -1,0 +1,78 @@
+---
+title: 'Generate revised gold standard supplemental table'
+author: "Robert Allaway (Sage Bionetworks)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    df_print: paged
+    code_fold: hide
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(98109)
+
+library(tidyverse)
+library(reticulate)
+library(ggplot2)
+
+# Synapse setup to use `reticulate`
+use_condaenv("ra2dream")
+synapseclient <- reticulate::import('synapseclient')
+syn <- synapseclient$Synapse()
+```
+
+```{r include=FALSE}
+#login
+syn$login()
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+gold_standard_original <- syn$get("syn22254942")$path %>% read_csv() %>% 
+  gather('joint', 'score', -Patient_ID)
+
+gold_standard_revised <- syn$get("syn22296988")$path %>% read_csv() %>% 
+  gather('joint', 'score_revised', -Patient_ID)
+
+gold <- full_join(gold_standard_original,gold_standard_revised) %>% 
+  filter(!joint %in% c("Overall_erosion", "Overall_narrowing")) %>% 
+  mutate(subchallenge = case_when(grepl(".+_E__.+", joint) ~ "SC3",
+                                  grepl(".+_J__.+", joint) ~ "SC2",
+                                  grepl("Overall_Tol", joint) ~ "SC1"))
+
+ggplot(gold, aes(x=score, y=score_revised)) +
+  geom_point() +
+  facet_wrap(~subchallenge, scales = "free")
+
+gold_revised <- gold %>% filter(score != score_revised) 
+
+revised_sc1 <- nrow(gold_revised %>% filter(subchallenge == "SC1"))
+revised_sc2 <- nrow(gold_revised %>% filter(subchallenge == "SC2"))
+revised_sc3 <- nrow(gold_revised %>% filter(subchallenge == "SC3"))
+
+total_sc1 <- nrow(gold %>% filter(subchallenge == "SC1"))
+total_sc2 <- nrow(gold %>% filter(subchallenge == "SC2"))
+total_sc3 <- nrow(gold %>% filter(subchallenge == "SC3"))
+
+gold_table <- tibble::tribble(
+  ~Subchallenge, ~`Percent revised`,
+  "SC1", round(revised_sc1/total_sc1*100,2),
+  "SC2", round(revised_sc2/total_sc2*100,2),
+  "SC3", round(revised_sc3/total_sc3*100,2)
+)
+
+sjPlot::tab_df(gold_table)
+
+write_csv(gold_revised %>% arrange(Patient_ID), "supplemental_table_revised_gold_standard_values.csv")
+```
+
+

@@ -31,7 +31,7 @@ First, import packages, scoring functions, and challenge data.
 library(tidyverse)
 library(reticulate)
 # library(reactable)
-use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+use_condaenv("ra2dream", required = T) #conda environment with synapse >2.0 installed
 synapse <- import('synapseclient')
 syn <- synapse$Synapse()
 

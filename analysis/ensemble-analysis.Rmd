@@ -31,7 +31,7 @@ First, import packages, scoring functions, and challenge data.
 library(tidyverse)
 library(reticulate)
 # library(reactable)
-# use_condaenv("synapse-2") #conda environment with synapse >2.0 installed
+use_condaenv("ra2dream", required = T) #conda environment with synapse >2.0 installed
 synapse <- import('synapseclient')
 syn <- synapse$Synapse()
 
@@ -39,7 +39,7 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', "####")
+syn$login()
 
 ```
 
@@ -105,13 +105,17 @@ Read in prediction files, combine, then bootstrap the predictions + a gold stand
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 N <- 1000  # number of bootstrapped scores to be calculated
 
+##filtered out Sha2256:6cb365.... because this was the wrong baseline model; we re-ran with the correct baseline (sha:2d72ae6...)
+
 query <- syn$tableQuery(
   "SELECT id, prediction_fileid, submitterid, createdOn,
     sc1_weighted_sum_error AS sc1, 
     sc2_joint_weighted_sum_rmse AS sc2, 
     sc3_joint_weighted_sum_rmse AS sc3
   FROM syn22236264 WHERE status = 'ACCEPTED' AND 
-    submitterid <> 3408914")$asDataFrame() %>%
+    submitterid <> 3408914 AND
+    submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>%
   group_by(submitterid) %>%
   slice(which.max(createdOn)) %>%
   select(-createdOn)
@@ -168,10 +172,10 @@ ensemble.sc1 <- ensemble.sc1 %>%
 ensemble.sc1 <- ensemble.sc1[,c("gold", "weight", ens_names)]
 
 p<-lapply(ens_names, function(x){
-  cor <- cor(ensemble.sc1$gold, ensemble.sc1[[x]], method = 'spearman')
+  cors <- cor(ensemble.sc1$gold, ensemble.sc1[[x]], method = 'spearman')
   ggplot(data = ensemble.sc1) +
     geom_point(aes(x = gold, y = !!sym(x))) +
-    ggtitle(glue::glue("spearman = {cor}"))
+    ggtitle(glue::glue("spearman = {cors}"))
 })
 
 bs_indices.sc1 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc1), N) %>%
@@ -226,9 +230,11 @@ ensemble.sc2 <- ensemble.sc2 %>%
 ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
+  cors <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc2) +
     geom_point(aes(x = score, y = !!sym(x))) +
-    ggtitle(glue::glue("spearman = {cor}"))
+    ggtitle(glue::glue("spearman = {cors}"))
+
 })
 
 p
@@ -278,10 +284,10 @@ ensemble.sc3 <- ensemble.sc3 %>%
 ensemble.sc3 <- ensemble.sc3[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
-  cor <- cor(ensemble.sc3$score, ensemble.sc3[[x]], method = 'spearman') 
+  cors <- cor(ensemble.sc3$score, ensemble.sc3[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc3) +
     geom_point(aes(x = score, y = !!sym(x))) +
-    ggtitle(glue::glue("spearman = {cor}"))
+    ggtitle(glue::glue("spearman = {cors}"))
 })
 
 p
@@ -393,11 +399,9 @@ plot_results <- function(results, bayes, subchallenge) {
     mutate(bayes_category=case_when(
       bayes == 0 ~ "Reference",
       mean_score < first_score & bayes<=3 ~ "<3, better",
-      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
-      mean_score < first_score & bayes>=10 ~ ">10, better",
+      mean_score < first_score & bayes>3 ~ ">3, better",
       mean_score > first_score & bayes<=3 ~ "<3, worse",
-      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
-      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
+      mean_score > first_score & bayes>3 ~">3, worse")) 
   
   lvls <- colnames(results)
   res$submission <- factor(res$submission, levels = lvls)
@@ -413,12 +417,10 @@ plot_results <- function(results, bayes, subchallenge) {
     theme_bw() +
     scale_color_manual(values = c(
       "Reference"="#000000", 
-      '<3, better' = '#AA3F0E', 
-      "3-10, better" = '#E15514', 
-      ">10, better" = "#EF7B45",
-      '<3, worse' = '#024DB6', 
-      "3-10, worse" = '#035EDD', 
-      ">10, worse" = "#3689FC"),
+      '<3, worse' = '#AA3F0E', 
+      ">3, worse" = '#EF7B45', 
+      '<3, better' = '#024DB6', 
+      ">3, better" = '#3689FC'),
       name = "Bayes Factor") +
     labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
@@ -430,14 +432,8 @@ plot_results <- function(results, bayes, subchallenge) {
 SC1 ensemble results are a little odd. Adding in RYM has a pretty substantial effect on the mean ensemble. 
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc1, bayes_top.sc1, "SC1")
-plot_results_path(boot.sc1, bayes_top.sc1, "SC1")
-```
-
-
-```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc2, bayes_top.sc2, "SC2")
-plot_results_path(boot.sc2, bayes_top.sc2, "SC2")
+plt1 <- plot_results(boot.sc1, bayes_top.sc1, "SC1")
+#plot_results_path(boot.sc1, bayes_top.sc1, "SC1")
 ```
 
 If we look at the raw predictions in a beeswarm plot, we see that RYM's predictions seem (on average) to be more conservative than the people that perform better (ie less likely to predict 0s or large values).  It's possible that this is causing the effect that we see in the ensemble. 
@@ -450,9 +446,12 @@ original_sc1_plot_data <-results.sc1 %>%
 lvls <- colnames(results.sc1)[-2]
 original_sc1_plot_data$model <- factor(original_sc1_plot_data$model, levels = lvls)
   
-ggplot(data = original_sc1_plot_data) +
-  ggbeeswarm::geom_beeswarm(aes(x = model, y = prediction), priority = "density", size = 0.1, cex = 0.2) +
+ens_violin_a <-ggplot(data = original_sc1_plot_data) +
+  geom_violin(aes(x = model, y = prediction),cex = 0.2) +
+  theme_bw() +
 theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+ens_violin_a
 
 ```
 
@@ -466,20 +465,33 @@ ensemble_plot_data <-ensemble.sc1 %>%
 lvls <- colnames(ensemble.sc1)[-2]
 ensemble_plot_data$model <- factor(ensemble_plot_data$model, levels = lvls)
   
-ggplot(data = ensemble_plot_data) +
-  ggbeeswarm::geom_beeswarm(aes(x = model, y = prediction), priority = "density", size = 0.1, cex = 0.2) +
-      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+ens_violin_b <- ggplot(data = ensemble_plot_data) +
+  geom_violin(aes(x = model, y = prediction),cex = 0.2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
+ens_violin_b
 ```
 
 My guess is that this is a fluke, probably caused by their generally more conservative predictions coincidentally helping reshape the overall distribution of the ensemble to better mirror that of the gold standard (at least, that's what the third plot I attached seems to demonstrate). SC1 also has substantially lower N than SC2/3, so maybe a better chance of getting lucky in this way. 
+
+## supplemental figure 
+
+```{r echo=TRUE, message=FALSE}
+
+cowplot::plot_grid(ens_violin_a,ens_violin_b, labels = "AUTO")
+
+ggsave("../figures/figure_s5.pdf", width = 9, height = 5)
+
+```
+
 
 ### Subchallenge 2
 
 SC2 results look more conventional : combine top models and increase performance a bit, but effect eventually disappears. 
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc2, bayes_top.sc2, "SC2")
+plt2 <- plot_results(boot.sc2, bayes_top.sc2, "SC2")
 ```
 
 ### Subchallenge 3
@@ -487,7 +499,7 @@ plot_results(boot.sc2, bayes_top.sc2, "SC2")
 SC3 results look more conventional : combine top models and increase performance a bit, but effect eventually disappears. 
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc3, bayes_top.sc3, "SC3")
+plt3 <- plot_results(boot.sc3, bayes_top.sc3, "SC3")
 ```
 
 # Rearrange SC1 ensemble. 
@@ -510,7 +522,7 @@ submissions.sc1 <- lapply(names(pred_filenames), function(team) {
 
 new_order <- c("Team Shirin", "Hongyang Li and Yuanfang Guan", "csabaibio", "Nc717", "zs_aicoe",
                "RYM", "NAD", "Gold Therapy" ,"Alpine Lads",  "CU_DSI_RA2_Challenge",
-               "kichuDL","vladyorsh" ,"Aboensis V", "Zbigniew Wojna", "RA2 Baseline Model")
+               "kichuDL", "Aboensis V", "Zbigniew Wojna", "RA2 Baseline Model")
 
 results.sc1 <- submissions.sc1[,c("gold", "weight", new_order)]
 
@@ -550,4 +562,11 @@ bayes_top.sc1 <- computeBayesFactorWhereRefIsNotBest(boot.sc1, refPredIndex=1, i
   rename(bayes = value)
 
 plot_results(boot.sc1, bayes_top.sc1, "SC1")
+```
+
+## Figure plotting
+
+```{r echo=TRUE, fig.height= 5, fig.width= 15}
+cowplot::plot_grid(plt1, plt2, plt3, nrow = 1, labels = "AUTO")
+ggplot2::ggsave("ra2_ensemble.pdf", height = 5, width = 15, units = "in")
 ```

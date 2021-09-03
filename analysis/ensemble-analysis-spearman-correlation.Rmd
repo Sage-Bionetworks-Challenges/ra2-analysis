@@ -1,14 +1,20 @@
 ---
-title: "Ensemble model analysis - Spearman correlation"
-author: "a name like Dorothy Vaughan"
+title: 'Final round ensembled model scoring - spearman correlation'
+author: "Robert Allaway (Sage Bionetworks)"
 date: "`r Sys.Date()`"
 output:
   html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
     df_print: paged
     code_fold: hide
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
 ---
+
 
 ## Introduction
 
@@ -33,14 +39,14 @@ syn <- synapse$Synapse()
 
 ```{r include=FALSE}
 #login
-syn$login('ra2dreamservice', '***REMOVED***')
+syn$login()
 
 ```
 
 Scoring helper functions.
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-# weights are not actually used in this script
+# 
 calculate_weight <- function(x){
   weight <- dplyr::if_else(x == 0, 1,
             dplyr::if_else(x == 1, 2,
@@ -52,8 +58,6 @@ calculate_weight <- function(x){
             dplyr::if_else(x>=148, 64, 0))))))))
   return(weight)
 }
-
-
 ```
 
 #### Goldstandard
@@ -81,13 +85,17 @@ Read in prediction files, combine, then bootstrap the predictions + a gold stand
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
 N <- 1000  # number of bootstrapped scores to be calculated
 
+##filtered out Sha2256:6cb365.... because this was the wrong baseline model; we re-ran with the correct baseline (sha:2d72ae6...)
+
 query <- syn$tableQuery(
   "SELECT id, prediction_fileid, submitterid, createdOn,
     sc1_weighted_sum_error AS sc1, 
     sc2_joint_weighted_sum_rmse AS sc2, 
     sc3_joint_weighted_sum_rmse AS sc3
   FROM syn22236264 WHERE status = 'ACCEPTED' AND 
-    submitterid <> 3408914")$asDataFrame() %>%
+    submitterid <> 3408914 AND
+    submitterid <> 3399952 AND
+    dockerdigest not in ('sha256:6cb365830745c5d368bcd128a3a1b750ace801da281356a5a623237408c10a3d')")$asDataFrame() %>%
   group_by(submitterid) %>%
   slice(which.max(createdOn)) %>%
   select(-createdOn)
@@ -127,14 +135,14 @@ submissions.sc1 <- lapply(names(pred_filenames), function(team) {
 results.sc1 <- submissions.sc1[,c("gold", "weight", (query %>% arrange(sc1))$submitterid)]
 
 ensemble.sc1 <- sapply(3:ncol(results.sc1), function(x){
+  print(colnames(results.sc1)[3:x])
   new_col <- results.sc1 %>% 
     select(3:x) %>% 
-    mutate(!!sym(as.character(x)) := rowMeans(across(where(is.numeric)))) %>% 
-    pluck(as.character(x))
+    rowMeans()
 }) %>% 
   as.data.frame()
 
-ens_names <- glue::glue("{1:ncol(ensemble.sc1)}_sc1_ensemble")
+ens_names <- c(glue::glue("{colnames(results.sc1)[3]}"), glue::glue("+{colnames(results.sc1)[-1:-3]}"))
 colnames(ensemble.sc1) <- ens_names
 
 ensemble.sc1 <- ensemble.sc1 %>% 
@@ -144,10 +152,10 @@ ensemble.sc1 <- ensemble.sc1 %>%
 ensemble.sc1 <- ensemble.sc1[,c("gold", "weight", ens_names)]
 
 p<-lapply(ens_names, function(x){
-  cor <- cor(ensemble.sc1$gold, ensemble.sc1[[x]], method = 'spearman')
+  correlation <- cor(ensemble.sc1$gold, ensemble.sc1[[x]], method = 'spearman')
   ggplot(data = ensemble.sc1) +
     geom_point(aes(x = gold, y = !!sym(x))) +
-    ggtitle(glue::glue("spearman = {cor}"))
+    ggtitle(glue::glue("spearman = {correlation}"))
 })
 
 bs_indices.sc1 <- matrix(1:nrow(ensemble.sc1), nrow(ensemble.sc1), N) %>%
@@ -190,7 +198,7 @@ ensemble.sc2 <- sapply(5:ncol(results.sc2), function(x){
 }) %>% 
   as.data.frame()
 
-ens_names <- glue::glue("{1:ncol(ensemble.sc2)}_sc2_ensemble")
+ens_names <- c(glue::glue("{colnames(results.sc2)[5]}"), glue::glue("+{colnames(results.sc2)[-1:-5]}"))
 colnames(ensemble.sc2) <- ens_names
 
 ensemble.sc2 <- ensemble.sc2 %>% 
@@ -202,13 +210,13 @@ ensemble.sc2 <- ensemble.sc2 %>%
 ensemble.sc2 <- ensemble.sc2[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
+  correlation <- cor(ensemble.sc2$score, ensemble.sc2[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc2) +
-    geom_boxplot(aes(x = as_factor(score), y = !!sym(x))) +
-    ylim(0,5)
+    geom_point(aes(x = score, y = !!sym(x))) +
+    ggtitle(glue::glue("spearman = {correlation}"))
 })
 
 p
-
 
 bs_indices.sc2 <- matrix(1:nrow(ensemble.sc2), nrow(ensemble.sc2), N) %>%
   apply(2, sample, replace = T)
@@ -221,7 +229,7 @@ boot.sc2 <- apply(bs_indices.sc2, 2, function(ind) {
       pred,
       method = "spearman"
     )
-  })
+    })
 }) %>%
   t()
 
@@ -247,7 +255,7 @@ ensemble.sc3 <- sapply(5:ncol(results.sc3), function(x){
 }) %>% 
   as.data.frame()
 
-ens_names <- glue::glue("{1:ncol(ensemble.sc3)}_sc3_ensemble")
+ens_names <- c(glue::glue("{colnames(results.sc3)[5]}"), glue::glue("+{colnames(results.sc3)[-1:-5]}"))
 colnames(ensemble.sc3) <- ens_names
 
 ensemble.sc3 <- ensemble.sc3 %>% 
@@ -259,13 +267,13 @@ ensemble.sc3 <- ensemble.sc3 %>%
 ensemble.sc3 <- ensemble.sc3[,c("Patient_ID", "joint", "weight", "score", ens_names)]
 
 p<-lapply(ens_names, function(x){
+  correlation <- cor(ensemble.sc3$score, ensemble.sc3[[x]], method = 'spearman') 
   ggplot(data = ensemble.sc3) +
-    geom_boxplot(aes(x = as_factor(score), y = !!sym(x))) +
-    ylim(0,10)
+    geom_point(aes(x = score, y = !!sym(x))) +
+    ggtitle(glue::glue("spearman = {correlation}"))
 })
 
 p
-
 
 bs_indices.sc3 <- matrix(1:nrow(ensemble.sc3), nrow(ensemble.sc3), N) %>%
   apply(2, sample, replace = T)
@@ -339,6 +347,7 @@ bayes_top.sc3 <- computeBayesFactorWhereRefIsNotBest(boot.sc3, refPredIndex=1, i
 # }
 ```
 
+
 ### Subchallenge 1
 
 ```{r echo=FALSE, message=FALSE}
@@ -356,7 +365,6 @@ bayes_top.sc2
 ```{r echo=FALSE, message=FALSE}
 bayes_top.sc3
 ```
-
 
 ---
 
@@ -377,15 +385,15 @@ plot_results <- function(results, bayes, subchallenge) {
     ungroup() %>% 
     mutate(bayes_category=case_when(
       bayes == 0 ~ "Reference",
-      mean_score < first_score & bayes<=3 ~ "<3, better",
-      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
-      mean_score < first_score & bayes>=10 ~ ">10, better",
-      mean_score > first_score & bayes<=3 ~ "<3, worse",
-      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
-      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
+      mean_score > first_score & bayes<=3 ~ "<3, better",
+      mean_score > first_score & bayes>3 ~ ">3, better",
+      mean_score < first_score & bayes<=3 ~ "<3, worse",
+      mean_score < first_score & bayes>3 ~">3, worse")) 
   
-  lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
+  lvls <- colnames(results)
   res$submission <- factor(res$submission, levels = lvls)
+  
+  labs <- glue::glue("{res$submission}+")
   
   ggplot(res, aes(
       x=submission,
@@ -396,78 +404,39 @@ plot_results <- function(results, bayes, subchallenge) {
     theme_bw() +
     scale_color_manual(values = c(
       "Reference"="#000000", 
-      '<3, better' = '#AA3F0E', 
-      "3-10, better" = '#E15514', 
-      ">10, better" = "#EF7B45",
-      '<3, worse' = '#024DB6', 
-      "3-10, worse" = '#035EDD', 
-      ">10, worse" = "#3689FC"),
+      '<3, worse' = '#AA3F0E', 
+      ">3, worse" = '#EF7B45', 
+      '<3, better' = '#024DB6', 
+      ">3, better" = '#3689FC'),
       name = "Bayes Factor") +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-}
-
-plot_results_path <- function(results, bayes, subchallenge) {
-   first_score <- mean(results[,1])
-  
-  res <- results %>%
-    as_tibble() %>%
-    gather(submission, bs_score) %>%
-    left_join(bayes) %>%
-    group_by(submission) %>% 
-    mutate(mean_score = mean(bs_score)) %>% 
-    ungroup() %>% 
-    mutate(bayes_category=case_when(
-      bayes == 0 ~ "Reference",
-      mean_score < first_score & bayes<=3 ~ "<3, better",
-      mean_score < first_score & bayes>=3 & bayes <10 ~ "3-10, better",
-      mean_score < first_score & bayes>=10 ~ ">10, better",
-      mean_score > first_score & bayes<=3 ~ "<3, worse",
-      mean_score > first_score & bayes>=3 & bayes <10 ~ "3-10, worse",
-      mean_score > first_score & bayes>=10 ~ ">10, worse")) 
-  
-  lvls <- stringr::str_sort(unique(res$submission), numeric = TRUE)
-  res$submission <- factor(res$submission, levels = lvls)
-  
-  ggplot(res, aes(
-      x=submission,
-      y=mean_score
-    )) +
-    geom_line(aes(group = 1)) +
-        geom_point(aes(color = bayes_category)) +
-    theme_bw() +
-    scale_color_manual(values = c(
-      "Reference"="#000000", 
-      '<3, better' = '#AA3F0E', 
-      "3-10, better" = '#E15514', 
-      ">10, better" = "#EF7B45",
-      '<3, worse' = '#024DB6', 
-      "3-10, worse" = '#035EDD', 
-      ">10, worse" = "#3689FC"),
-      name = "Bayes Factor") +
-    labs(x="Team", y=paste("Bootstrapped", subchallenge, "Score")) +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-}
+    labs(x="Team", y=paste("Bootstrapped", subchallenge, "\nSpearman correlation")) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  }
 ```
 
 ### Subchallenge 1
 
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc1, bayes_top.sc1, "SC1")
-plot_results_path(boot.sc1, bayes_top.sc1, "SC1")
+plt1 <-plot_results(boot.sc1, bayes_top.sc1, "SC1")
 ```
+
 
 ### Subchallenge 2
 
+
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc2, bayes_top.sc2, "SC2")
-plot_results_path(boot.sc2, bayes_top.sc2, "SC2")
+plt2 <- plot_results(boot.sc2, bayes_top.sc2, "SC2")
 ```
 
 ### Subchallenge 3
 
+
 ```{r echo=TRUE, message=FALSE}
-plot_results(boot.sc3, bayes_top.sc3, "SC3")
-plot_results_path(boot.sc3, bayes_top.sc3, "SC3")
+plt3 <- plot_results(boot.sc3, bayes_top.sc3, "SC3")
 ```
 
+
+```{r echo=TRUE, fig.height= 7, fig.width= 21}
+cowplot::plot_grid(plt1, plt2, plt3, nrow = 1, labels = "AUTO")
+ggplot2::ggsave("ra2_ensemble_spearman.pdf", height = 5, width = 15, units = "in")
+```
